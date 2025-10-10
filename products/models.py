@@ -2,6 +2,7 @@ import uuid
 from django.db import models
 from django.conf import settings
 from django.utils.text import slugify
+from core.models import BaseModel
 
 def get_image_upload_path(instance, filename):
     """Generates a unique path for every image."""
@@ -10,7 +11,7 @@ def get_image_upload_path(instance, filename):
     return f'products/images/{filename}'
 
 
-class Brand(models.Model):
+class Brand(BaseModel):
     """Model that represents a brand, ej: ASUS, MSI, NVIDIA."""
     name = models.CharField(max_length=100, null=False, unique=True, help_text="Brand's name")
     slug = models.SlugField(max_length=120, unique=True, blank=True, help_text="URL slug, auto-generated")
@@ -29,7 +30,7 @@ class Brand(models.Model):
         return self.name
 
 
-class Category(models.Model):
+class Category(BaseModel):
     """Model that represents the product's category, ej: Portátiles, Tarjetas Gráficas."""
     name = models.CharField(max_length=100, unique=True, null=False, help_text="Categorys name")
     slug = models.SlugField(max_length=120, unique=True, blank=True, help_text="URL slug, auto-generated")
@@ -49,7 +50,7 @@ class Category(models.Model):
         return self.name
 
 
-class BaseProduct(models.Model):
+class BaseProduct(BaseModel):
     """Base model that contains the product's base info."""
     model_name = models.CharField(max_length=255, null=False, help_text="Full name of the product model")
     slug = models.SlugField(max_length=280, unique=True, blank=True, null=False, help_text="Slug for the URL, it is automatically generated")
@@ -81,7 +82,7 @@ class BaseProduct(models.Model):
         return f"{self.brand.name} - {self.model_name}"
 
 
-class ProductVariant(models.Model):
+class ProductVariant(BaseModel):
     """Represents a specific variant of a BaseProduct, differentiated by condition, stock status, price, etc."""
     class ConditionChoices(models.TextChoices):
         NEW = 'nuevo', 'Nuevo'
@@ -97,7 +98,7 @@ class ProductVariant(models.Model):
 
     base_product = models.ForeignKey(BaseProduct, on_delete=models.PROTECT, related_name="product_variants", help_text="Base product to which this variant belongs")
     price = models.IntegerField(null=False, help_text="Selling price of the variant")
-    description = models.TextField(null=True, blank=True, help_text="Specific description for this variant (e.g., ‘Open box, unused equipment’)")
+    description = models.TextField(null=True, blank=True, help_text="Specific description for this variant (e.g., 'Open box, unused equipment')")
     condition = models.CharField(null=False, max_length=20, choices=ConditionChoices.choices, default=ConditionChoices.NEW, help_text="Condition of the product")
     stock_status = models.CharField(null=False, max_length=20, choices=StatusStockChoices.choices, default=StatusStockChoices.IN_STOCK, help_text="Product stock status")
     is_publishied = models.BooleanField(default=True, null=False, help_text="Indicates whether the variant is visible in the store")
@@ -119,7 +120,7 @@ class ProductVariant(models.Model):
         return f"{self.base_product.model_name} ({self.get_condition_display()}) - {self.pk}"
 
 
-class Image(models.Model):
+class Image(BaseModel):
     """Model to save the images that belongs to the product."""
     product_variant = models.ForeignKey(BaseProduct, on_delete=models.ProtectedError, related_name="images", help_text="Variant to which the image belongs")
     imagen = models.ImageField(upload_to=get_image_upload_path, help_text="Product' image")
