@@ -1,43 +1,44 @@
 from rest_framework import serializers
 from django.contrib.auth import authenticate
 from rest_framework_simplejwt.tokens import RefreshToken
+from .models import User
 
 
 class LoginSerializer(serializers.Serializer):
     """
-    Serializer para el login de usuarios.
-    Valida las credenciales y genera tokens JWT.
+    Serializer that handles user login and JWT token generation.
     """
-    username = serializers.CharField(required=True)
+    email = serializers.CharField(required=True)
     password = serializers.CharField(required=True, write_only=True)
 
     def validate(self, attrs):
-        username = attrs.get('username')
+        email = attrs.get('email')
         password = attrs.get('password')
 
-        if username and password:
-            user = authenticate(username=username, password=password)
+        if email and password:
+            # Since we use email as username, we need to pass it as username to authenticate
+            user = authenticate(username=email, password=password)
 
             if not user:
                 raise serializers.ValidationError(
-                    'Credenciales inválidas. Por favor, verifica tu usuario y contraseña.'
+                    'Invalid credentials. Please check your email and password.'
                 )
 
             if not user.is_active:
                 raise serializers.ValidationError(
-                    'Esta cuenta está desactivada.'
+                    'This account is disabled.'
                 )
 
             attrs['user'] = user
             return attrs
         else:
             raise serializers.ValidationError(
-                'Debes proporcionar usuario y contraseña.'
+                'Email and password are required.'
             )
 
     def get_tokens(self, user):
         """
-        Genera tokens de acceso y refresh para el usuario autenticado.
+        Create and return JWT tokens for the authenticated user.
         """
         refresh = RefreshToken.for_user(user)
 
@@ -45,3 +46,14 @@ class LoginSerializer(serializers.Serializer):
             'refresh': str(refresh),
             'access': str(refresh.access_token),
         }
+
+
+class UserSerializer(serializers.ModelSerializer):
+    """
+    Serializer for User model.
+    Used for listing and retrieving user information.
+    """
+    class Meta:
+        model = User
+        fields = ['first_name', 'last_name', 'email', 'last_access', 'is_active']
+        read_only_fields = ['email', 'last_access']
