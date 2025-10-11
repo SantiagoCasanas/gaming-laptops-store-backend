@@ -1,0 +1,955 @@
+{
+	"info": {
+		"_postman_id": "gaming-laptops-store-api",
+		"name": "Gaming Laptops Store API",
+		"description": "Collection for testing all endpoints of the Gaming Laptops Store Backend API.\n\nBase URL: http://localhost:8000",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"auth": {
+		"type": "bearer",
+		"bearer": [
+			{
+				"key": "token",
+				"value": "{{access_token}}",
+				"type": "string"
+			}
+		]
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8000",
+			"type": "string"
+		},
+		{
+			"key": "access_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "refresh_token",
+			"value": "",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "Users",
+			"item": [
+				{
+					"name": "Login",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.collectionVariables.set(\"access_token\", jsonData.access);",
+									"    pm.collectionVariables.set(\"refresh_token\", jsonData.refresh);",
+									"    console.log(\"Tokens saved successfully\");",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"user@example.com\",\n    \"password\": \"your_password\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/user/login/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"user",
+								"login",
+								""
+							]
+						},
+						"description": "Login endpoint. Returns JWT access and refresh tokens.\n\n**Authentication:** None (public endpoint)\n\n**Body:**\n- email: User email\n- password: User password"
+					},
+					"response": []
+				},
+				{
+					"name": "Register User",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"newuser@example.com\",\n    \"password\": \"securepassword123\",\n    \"first_name\": \"John\",\n    \"last_name\": \"Doe\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/user/register/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"user",
+								"register",
+								""
+							]
+						},
+						"description": "Register a new user.\n\n**Authentication:** None (public endpoint)\n\n**Body:**\n- email: User email (required)\n- password: User password (required)\n- first_name: User first name (required)\n- last_name: User last name (required)"
+					},
+					"response": []
+				},
+				{
+					"name": "Refresh Token",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.collectionVariables.set(\"access_token\", jsonData.access);",
+									"    console.log(\"Access token refreshed successfully\");",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"refresh\": \"{{refresh_token}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/user/token/refresh/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"user",
+								"token",
+								"refresh",
+								""
+							]
+						},
+						"description": "Refresh the access token using the refresh token.\n\n**Authentication:** None (uses refresh token in body)\n\n**Body:**\n- refresh: Refresh token"
+					},
+					"response": []
+				},
+				{
+					"name": "List Users",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/user/list/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"user",
+								"list",
+								""
+							]
+						},
+						"description": "Get a list of all users.\n\n**Authentication:** Bearer Token (JWT)"
+					},
+					"response": []
+				},
+				{
+					"name": "Update User",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"first_name\": \"Jane\",\n    \"last_name\": \"Smith\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/user/update/:id/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"user",
+								"update",
+								":id",
+								""
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1",
+									"description": "User ID"
+								}
+							]
+						},
+						"description": "Update user information.\n\n**Authentication:** Bearer Token (JWT)\n\n**Body (all optional):**\n- first_name: User first name\n- last_name: User last name\n- email: User email\n- password: New password"
+					},
+					"response": []
+				},
+				{
+					"name": "Activate User",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/user/activate/:id/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"user",
+								"activate",
+								":id",
+								""
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1",
+									"description": "User ID"
+								}
+							]
+						},
+						"description": "Activate a user account.\n\n**Authentication:** Bearer Token (JWT)"
+					},
+					"response": []
+				},
+				{
+					"name": "Deactivate User",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/user/deactivate/:id/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"user",
+								"deactivate",
+								":id",
+								""
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1",
+									"description": "User ID"
+								}
+							]
+						},
+						"description": "Deactivate a user account.\n\n**Authentication:** Bearer Token (JWT)"
+					},
+					"response": []
+				}
+			],
+			"description": "User management endpoints including authentication, registration, and user operations."
+		},
+		{
+			"name": "Brands",
+			"item": [
+				{
+					"name": "List Brands",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/products/brands/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"products",
+								"brands",
+								""
+							]
+						},
+						"description": "Get a list of all brands.\n\n**Authentication:** Bearer Token (JWT)"
+					},
+					"response": []
+				},
+				{
+					"name": "Create Brand",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"ASUS\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/products/brands/create/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"products",
+								"brands",
+								"create",
+								""
+							]
+						},
+						"description": "Create a new brand.\n\n**Authentication:** Bearer Token (JWT)\n\n**Body:**\n- name: Brand name (required, unique)"
+					},
+					"response": []
+				},
+				{
+					"name": "Update Brand",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"ASUS ROG\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/products/brands/update/:id/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"products",
+								"brands",
+								"update",
+								":id",
+								""
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1",
+									"description": "Brand ID"
+								}
+							]
+						},
+						"description": "Update brand information.\n\n**Authentication:** Bearer Token (JWT)\n\n**Body:**\n- name: Brand name (optional)"
+					},
+					"response": []
+				},
+				{
+					"name": "Activate Brand",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/products/brands/activate/:id/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"products",
+								"brands",
+								"activate",
+								":id",
+								""
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1",
+									"description": "Brand ID"
+								}
+							]
+						},
+						"description": "Activate a brand.\n\n**Authentication:** Bearer Token (JWT)"
+					},
+					"response": []
+				},
+				{
+					"name": "Deactivate Brand",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/products/brands/deactivate/:id/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"products",
+								"brands",
+								"deactivate",
+								":id",
+								""
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1",
+									"description": "Brand ID"
+								}
+							]
+						},
+						"description": "Deactivate a brand.\n\n**Authentication:** Bearer Token (JWT)"
+					},
+					"response": []
+				}
+			],
+			"description": "Brand management endpoints."
+		},
+		{
+			"name": "Categories",
+			"item": [
+				{
+					"name": "List Categories",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/products/categories/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"products",
+								"categories",
+								""
+							]
+						},
+						"description": "Get a list of all categories.\n\n**Authentication:** Bearer Token (JWT)"
+					},
+					"response": []
+				},
+				{
+					"name": "Create Category",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Gaming Laptops\",\n    \"description\": \"High-performance laptops for gaming\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/products/categories/create/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"products",
+								"categories",
+								"create",
+								""
+							]
+						},
+						"description": "Create a new category.\n\n**Authentication:** Bearer Token (JWT)\n\n**Body:**\n- name: Category name (required, unique)\n- description: Category description (optional)"
+					},
+					"response": []
+				},
+				{
+					"name": "Update Category",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Gaming Laptops Pro\",\n    \"description\": \"Professional gaming laptops\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/products/categories/update/:id/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"products",
+								"categories",
+								"update",
+								":id",
+								""
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1",
+									"description": "Category ID"
+								}
+							]
+						},
+						"description": "Update category information.\n\n**Authentication:** Bearer Token (JWT)\n\n**Body:**\n- name: Category name (optional)\n- description: Category description (optional)"
+					},
+					"response": []
+				},
+				{
+					"name": "Activate Category",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/products/categories/activate/:id/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"products",
+								"categories",
+								"activate",
+								":id",
+								""
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1",
+									"description": "Category ID"
+								}
+							]
+						},
+						"description": "Activate a category.\n\n**Authentication:** Bearer Token (JWT)"
+					},
+					"response": []
+				},
+				{
+					"name": "Deactivate Category",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/products/categories/deactivate/:id/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"products",
+								"categories",
+								"deactivate",
+								":id",
+								""
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1",
+									"description": "Category ID"
+								}
+							]
+						},
+						"description": "Deactivate a category.\n\n**Authentication:** Bearer Token (JWT)"
+					},
+					"response": []
+				}
+			],
+			"description": "Category management endpoints."
+		},
+		{
+			"name": "Base Products",
+			"item": [
+				{
+					"name": "List Base Products",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/products/base-products/?ordering=-creation_date",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"products",
+								"base-products",
+								""
+							],
+							"query": [
+								{
+									"key": "model_name",
+									"value": "lenovo",
+									"description": "Filter by model name (partial match)",
+									"disabled": true
+								},
+								{
+									"key": "brand",
+									"value": "1",
+									"description": "Filter by brand ID",
+									"disabled": true
+								},
+								{
+									"key": "brand__name",
+									"value": "asus",
+									"description": "Filter by brand name (partial match)",
+									"disabled": true
+								},
+								{
+									"key": "categories",
+									"value": "1",
+									"description": "Filter by category ID",
+									"disabled": true
+								},
+								{
+									"key": "active",
+									"value": "true",
+									"description": "Filter by active status",
+									"disabled": true
+								},
+								{
+									"key": "spec_processor_model",
+									"value": "i5",
+									"description": "Filter by processor model",
+									"disabled": true
+								},
+								{
+									"key": "spec_processor_cores",
+									"value": "10",
+									"description": "Filter by processor cores",
+									"disabled": true
+								},
+								{
+									"key": "spec_screen_size",
+									"value": "15.6",
+									"description": "Filter by screen size",
+									"disabled": true
+								},
+								{
+									"key": "spec_memory_size",
+									"value": "16gb",
+									"description": "Filter by memory size",
+									"disabled": true
+								},
+								{
+									"key": "spec_graphics_model",
+									"value": "rtx",
+									"description": "Filter by graphics card model",
+									"disabled": true
+								},
+								{
+									"key": "search",
+									"value": "gaming",
+									"description": "Search in model name and description",
+									"disabled": true
+								},
+								{
+									"key": "ordering",
+									"value": "-creation_date",
+									"description": "Order by field (prefix with - for descending)"
+								}
+							]
+						},
+						"description": "Get a list of base products with advanced filtering.\n\n**Authentication:** Bearer Token (JWT)\n\n**Available filters:**\n- model_name, slug, brand, brand__name, categories, active\n- spec_processor_model, spec_processor_cores, spec_screen_size\n- spec_screen_resolution, spec_screen_refresh_rate\n- spec_memory_size, spec_memory_type\n- spec_graphics_model, spec_graphics_vram\n- spec_storage_size, spec_storage_type\n- spec_weight, spec_battery\n\n**Search:** ?search=keyword\n**Ordering:** ?ordering=field or ?ordering=-field"
+					},
+					"response": []
+				},
+				{
+					"name": "Create Base Product",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "model_name",
+									"value": "Lenovo LOQ 15.6",
+									"description": "Product model name",
+									"type": "text"
+								},
+								{
+									"key": "long_description",
+									"value": "High-performance gaming laptop with RTX graphics and latest Intel processor",
+									"description": "Detailed description",
+									"type": "text"
+								},
+								{
+									"key": "brand",
+									"value": "1",
+									"description": "Brand ID",
+									"type": "text"
+								},
+								{
+									"key": "categories",
+									"value": "1",
+									"description": "Category ID (can add multiple)",
+									"type": "text"
+								},
+								{
+									"key": "specs",
+									"value": "{\"screen\":{\"size\":\"15.6\\\"\",\"resolution\":\"FHD\",\"refresh_rate\":\"144 Hz\"},\"processor\":{\"model\":\"Intel Core i5 13450HX\",\"cores\":10,\"threads\":16},\"memory\":{\"size\":\"16GB\",\"type\":\"DDR5\"},\"graphics\":{\"model\":\"NVIDIA GeForce RTX 5050\",\"vram\":\"8GB\"},\"storage\":{\"size\":\"512GB\",\"type\":\"SSD\"},\"connectivity\":[\"WiFi 6\",\"Bluetooth 5.2\",\"USB-C\",\"HDMI 2.1\"],\"battery\":\"60Wh\",\"weight\":\"2.4 kg\"}",
+									"description": "Product specifications in JSON format",
+									"type": "text"
+								},
+								{
+									"key": "image_1",
+									"description": "Product image 1",
+									"type": "file",
+									"src": [],
+									"disabled": true
+								},
+								{
+									"key": "alt_text_1",
+									"value": "Lenovo LOQ front view",
+									"description": "Alt text for image 1",
+									"type": "text",
+									"disabled": true
+								},
+								{
+									"key": "image_2",
+									"description": "Product image 2",
+									"type": "file",
+									"src": [],
+									"disabled": true
+								},
+								{
+									"key": "alt_text_2",
+									"value": "Lenovo LOQ side view",
+									"description": "Alt text for image 2",
+									"type": "text",
+									"disabled": true
+								},
+								{
+									"key": "image_3",
+									"description": "Product image 3",
+									"type": "file",
+									"src": [],
+									"disabled": true
+								},
+								{
+									"key": "alt_text_3",
+									"value": "Lenovo LOQ keyboard",
+									"description": "Alt text for image 3",
+									"type": "text",
+									"disabled": true
+								},
+								{
+									"key": "image_4",
+									"description": "Product image 4",
+									"type": "file",
+									"src": [],
+									"disabled": true
+								},
+								{
+									"key": "alt_text_4",
+									"value": "Lenovo LOQ ports",
+									"description": "Alt text for image 4",
+									"type": "text",
+									"disabled": true
+								}
+							]
+						},
+						"url": {
+							"raw": "{{base_url}}/products/base-products/create/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"products",
+								"base-products",
+								"create",
+								""
+							]
+						},
+						"description": "Create a new base product with images.\n\n**Authentication:** Bearer Token (JWT)\n\n**Body (multipart/form-data):**\n- model_name: Product model name (required)\n- long_description: Detailed description (required)\n- brand: Brand ID (required)\n- categories: Category IDs (required, can be multiple)\n- specs: JSON object with specifications (required)\n- image_1, image_2, image_3, image_4: Image files (optional)\n- alt_text_1, alt_text_2, alt_text_3, alt_text_4: Alt text for images (optional)"
+					},
+					"response": []
+				},
+				{
+					"name": "Update Base Product",
+					"request": {
+						"method": "PATCH",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "model_name",
+									"value": "Lenovo LOQ 15.6 Updated",
+									"description": "Updated model name",
+									"type": "text",
+									"disabled": true
+								},
+								{
+									"key": "long_description",
+									"value": "Updated description",
+									"description": "Updated description",
+									"type": "text",
+									"disabled": true
+								},
+								{
+									"key": "brand",
+									"value": "2",
+									"description": "Updated brand ID",
+									"type": "text",
+									"disabled": true
+								},
+								{
+									"key": "categories",
+									"value": "1",
+									"description": "Updated category IDs",
+									"type": "text",
+									"disabled": true
+								},
+								{
+									"key": "specs",
+									"value": "{\"screen\":{\"size\":\"15.6\\\"\",\"resolution\":\"QHD\",\"refresh_rate\":\"165 Hz\"}}",
+									"description": "Updated specs",
+									"type": "text",
+									"disabled": true
+								},
+								{
+									"key": "image_1",
+									"description": "New image 1",
+									"type": "file",
+									"src": [],
+									"disabled": true
+								},
+								{
+									"key": "alt_text_1",
+									"value": "Updated alt text",
+									"description": "Updated alt text for image 1",
+									"type": "text",
+									"disabled": true
+								},
+								{
+									"key": "remove_images",
+									"value": "1",
+									"description": "Image IDs to remove (can be multiple)",
+									"type": "text",
+									"disabled": true
+								}
+							]
+						},
+						"url": {
+							"raw": "{{base_url}}/products/base-products/update/:id/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"products",
+								"base-products",
+								"update",
+								":id",
+								""
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1",
+									"description": "Base Product ID"
+								}
+							]
+						},
+						"description": "Update base product information.\n\n**Authentication:** Bearer Token (JWT)\n\n**Body (multipart/form-data, all optional):**\n- model_name: Updated model name\n- long_description: Updated description\n- brand: Updated brand ID\n- categories: Updated category IDs\n- specs: Updated specs JSON\n- image_1, image_2, image_3, image_4: New image files\n- alt_text_1, alt_text_2, alt_text_3, alt_text_4: Updated alt text\n- remove_images: Image IDs to remove"
+					},
+					"response": []
+				},
+				{
+					"name": "Activate Base Product",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/products/base-products/activate/:id/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"products",
+								"base-products",
+								"activate",
+								":id",
+								""
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1",
+									"description": "Base Product ID"
+								}
+							]
+						},
+						"description": "Activate a base product.\n\n**Authentication:** Bearer Token (JWT)"
+					},
+					"response": []
+				},
+				{
+					"name": "Deactivate Base Product",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/products/base-products/deactivate/:id/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"products",
+								"base-products",
+								"deactivate",
+								":id",
+								""
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1",
+									"description": "Base Product ID"
+								}
+							]
+						},
+						"description": "Deactivate a base product.\n\n**Authentication:** Bearer Token (JWT)"
+					},
+					"response": []
+				}
+			],
+			"description": "Base Product management endpoints with advanced filtering and image upload capabilities."
+		}
+	]
+}

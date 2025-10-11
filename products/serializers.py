@@ -192,6 +192,7 @@ class BaseProductCreateSerializer(serializers.ModelSerializer):
 
         # Add categories
         base_product.categories.set(category_ids)
+        print(images_data)
 
         # Create images
         for image_data in images_data:

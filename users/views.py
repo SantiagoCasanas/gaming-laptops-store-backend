@@ -44,7 +44,7 @@ class UserCreateView(CreateAPIView):
     Does not require authentication (public endpoint).
     """
     serializer_class = UserCreateSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
