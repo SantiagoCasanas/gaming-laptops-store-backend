@@ -98,10 +98,9 @@ class ProductVariant(BaseModel):
 
     base_product = models.ForeignKey(BaseProduct, on_delete=models.PROTECT, related_name="product_variants", help_text="Base product to which this variant belongs")
     price = models.IntegerField(null=False, help_text="Selling price of the variant")
-    description = models.TextField(null=True, blank=True, help_text="Specific description for this variant (e.g., 'Open box, unused equipment')")
     condition = models.CharField(null=False, max_length=20, choices=ConditionChoices.choices, default=ConditionChoices.NEW, help_text="Condition of the product")
     stock_status = models.CharField(null=False, max_length=20, choices=StatusStockChoices.choices, default=StatusStockChoices.IN_STOCK, help_text="Product stock status")
-    is_publishied = models.BooleanField(default=True, null=False, help_text="Indicates whether the variant is visible in the store")
+    is_published = models.BooleanField(default=True, null=False, help_text="Indicates whether the variant is visible in the store")
     user_last_modified = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,

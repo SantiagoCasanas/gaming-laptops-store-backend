@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Brand, Category, BaseProduct, Image
+from .models import Brand, Category, BaseProduct, Image, ProductVariant
 
 
 class BrandSerializer(serializers.ModelSerializer):
@@ -197,7 +197,7 @@ class BaseProductCreateSerializer(serializers.ModelSerializer):
         # Create images
         for image_data in images_data:
             Image.objects.create(
-                product_variant=base_product,
+                base_product=base_product,
                 **image_data
             )
 
@@ -315,7 +315,7 @@ class BaseProductUpdateSerializer(serializers.ModelSerializer):
         # Handle image removal
         remove_images = validated_data.pop('remove_images', [])
         if remove_images:
-            Image.objects.filter(id__in=remove_images, product_variant=instance).delete()
+            Image.objects.filter(id__in=remove_images, base_product=instance).delete()
 
         # Extract categories
         category_ids = validated_data.pop('categories', None)
@@ -338,8 +338,127 @@ class BaseProductUpdateSerializer(serializers.ModelSerializer):
         # Add new images
         for image_data in images_data:
             Image.objects.create(
-                product_variant=instance,
+                base_product=instance,
                 **image_data
             )
+
+        return instance
+
+
+# ProductVariant Serializers
+
+class ProductVariantSerializer(serializers.ModelSerializer):
+    """
+    Serializer for ProductVariant listing and retrieval.
+    Includes related base product information.
+    """
+    base_product = BaseProductSerializer(read_only=True)
+    condition_display = serializers.CharField(source='get_condition_display', read_only=True)
+    stock_status_display = serializers.CharField(source='get_stock_status_display', read_only=True)
+
+    class Meta:
+        model = ProductVariant
+        fields = [
+            'id',
+            'base_product',
+            'price',
+            'condition',
+            'condition_display',
+            'stock_status',
+            'stock_status_display',
+            'is_published',
+            'active',
+            'creation_date',
+            'update_date'
+        ]
+
+
+class ProductVariantCreateSerializer(serializers.ModelSerializer):
+    """
+    Serializer for creating a new ProductVariant.
+    """
+    class Meta:
+        model = ProductVariant
+        fields = [
+            'base_product',
+            'price',
+            'condition',
+            'stock_status',
+            'is_published'
+        ]
+
+    def validate_base_product(self, value):
+        """Validate that the base product exists and is active."""
+        if not value.active:
+            raise serializers.ValidationError("The selected base product is inactive.")
+        return value
+
+    def validate_price(self, value):
+        """Validate that the price is positive."""
+        if value <= 0:
+            raise serializers.ValidationError("Price must be greater than zero.")
+        return value
+
+    def create(self, validated_data):
+        """Create ProductVariant with user tracking."""
+        # Get user from context
+        user = self.context['request'].user
+
+        # Create ProductVariant
+        product_variant = ProductVariant.objects.create(
+            **validated_data,
+            user_last_modified=user
+        )
+
+        return product_variant
+
+
+class ProductVariantUpdateSerializer(serializers.ModelSerializer):
+    """
+    Serializer for updating ProductVariant.
+    All fields are optional for partial updates.
+    """
+    class Meta:
+        model = ProductVariant
+        fields = [
+            'base_product',
+            'price',
+            'condition',
+            'stock_status',
+            'is_published'
+        ]
+        extra_kwargs = {
+            'base_product': {'required': False},
+            'price': {'required': False},
+            'condition': {'required': False},
+            'stock_status': {'required': False},
+            'is_published': {'required': False}
+        }
+
+    def validate_base_product(self, value):
+        """Validate that the base product exists and is active."""
+        if value and not value.active:
+            raise serializers.ValidationError("The selected base product is inactive.")
+        return value
+
+    def validate_price(self, value):
+        """Validate that the price is positive."""
+        if value is not None and value <= 0:
+            raise serializers.ValidationError("Price must be greater than zero.")
+        return value
+
+    def update(self, instance, validated_data):
+        """Update ProductVariant with user tracking."""
+        # Get user from context
+        user = self.context['request'].user
+
+        # Update fields
+        instance.base_product = validated_data.get('base_product', instance.base_product)
+        instance.price = validated_data.get('price', instance.price)
+        instance.condition = validated_data.get('condition', instance.condition)
+        instance.stock_status = validated_data.get('stock_status', instance.stock_status)
+        instance.is_published = validated_data.get('is_published', instance.is_published)
+        instance.user_last_modified = user
+        instance.save()
 
         return instance

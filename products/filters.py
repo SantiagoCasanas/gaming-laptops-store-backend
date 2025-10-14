@@ -1,5 +1,5 @@
 from django_filters import rest_framework as filters
-from .models import BaseProduct
+from .models import BaseProduct, ProductVariant
 
 
 class BaseProductFilter(filters.FilterSet):
@@ -136,4 +136,50 @@ class BaseProductFilter(filters.FilterSet):
             'spec_storage_type',
             'spec_weight',
             'spec_battery'
+        ]
+
+
+class ProductVariantFilter(filters.FilterSet):
+    """
+    Advanced filter for ProductVariant.
+
+    Available filters:
+    - base_product: Base product ID
+    - base_product__slug: Base product slug (partial match)
+    - base_product__model_name: Base product model name (partial match)
+    - condition: Condition (exact match: nuevo, open_box, refurbished, usado)
+    - stock_status: Stock status (exact match: en_stock, en_camino, por_importacion, sin_stock)
+    - is_published: Boolean (true/false)
+    - active: Boolean (true/false)
+    - price_min: Minimum price (greater than or equal)
+    - price_max: Maximum price (less than or equal)
+    """
+
+    # Basic field filters
+    base_product = filters.NumberFilter(field_name='base_product__id')
+    base_product__slug = filters.CharFilter(field_name='base_product__slug', lookup_expr='icontains')
+    base_product__model_name = filters.CharFilter(field_name='base_product__model_name', lookup_expr='icontains')
+
+    condition = filters.ChoiceFilter(choices=ProductVariant.ConditionChoices.choices)
+    stock_status = filters.ChoiceFilter(choices=ProductVariant.StatusStockChoices.choices)
+
+    is_published = filters.BooleanFilter()
+    active = filters.BooleanFilter()
+
+    # Price range filters
+    price_min = filters.NumberFilter(field_name='price', lookup_expr='gte', label='Minimum Price')
+    price_max = filters.NumberFilter(field_name='price', lookup_expr='lte', label='Maximum Price')
+
+    class Meta:
+        model = ProductVariant
+        fields = [
+            'base_product',
+            'base_product__slug',
+            'base_product__model_name',
+            'condition',
+            'stock_status',
+            'is_published',
+            'active',
+            'price_min',
+            'price_max'
         ]

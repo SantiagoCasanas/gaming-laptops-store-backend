@@ -1,37 +1,10 @@
 {
 	"info": {
-		"_postman_id": "gaming-laptops-store-api",
+		"_postman_id": "370397b0-9ac8-4b51-9f0d-66e5f0f1f6a8",
 		"name": "Gaming Laptops Store API",
 		"description": "Collection for testing all endpoints of the Gaming Laptops Store Backend API.\n\nBase URL: http://localhost:8000",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
 	},
-	"auth": {
-		"type": "bearer",
-		"bearer": [
-			{
-				"key": "token",
-				"value": "{{access_token}}",
-				"type": "string"
-			}
-		]
-	},
-	"variable": [
-		{
-			"key": "base_url",
-			"value": "http://localhost:8000",
-			"type": "string"
-		},
-		{
-			"key": "access_token",
-			"value": "",
-			"type": "string"
-		},
-		{
-			"key": "refresh_token",
-			"value": "",
-			"type": "string"
-		}
-	],
 	"item": [
 		{
 			"name": "Users",
@@ -947,9 +920,283 @@
 						"description": "Deactivate a base product.\n\n**Authentication:** Bearer Token (JWT)"
 					},
 					"response": []
+				},
+				{
+					"name": "Detail Base Product",
+					"request": {
+						"method": "GET",
+						"header": []
+					},
+					"response": []
 				}
 			],
 			"description": "Base Product management endpoints with advanced filtering and image upload capabilities."
+		},
+		{
+			"name": "Product Variants",
+			"item": [
+				{
+					"name": "List Product Variants",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/products/variants/list/?ordering=price",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"products",
+								"variants",
+								"list",
+								""
+							],
+							"query": [
+								{
+									"key": "base_product",
+									"value": "1",
+									"description": "Filter by base product ID",
+									"disabled": true
+								},
+								{
+									"key": "base_product__slug",
+									"value": "lenovo-loq",
+									"description": "Filter by base product slug",
+									"disabled": true
+								},
+								{
+									"key": "condition",
+									"value": "nuevo",
+									"description": "Filter by condition (nuevo, open_box, refurbished, usado)",
+									"disabled": true
+								},
+								{
+									"key": "stock_status",
+									"value": "en_stock",
+									"description": "Filter by stock status",
+									"disabled": true
+								},
+								{
+									"key": "is_published",
+									"value": "true",
+									"description": "Filter by published status",
+									"disabled": true
+								},
+								{
+									"key": "active",
+									"value": "true",
+									"description": "Filter by active status",
+									"disabled": true
+								},
+								{
+									"key": "price_min",
+									"value": "1000000",
+									"description": "Minimum price filter",
+									"disabled": true
+								},
+								{
+									"key": "price_max",
+									"value": "2000000",
+									"description": "Maximum price filter",
+									"disabled": true
+								},
+								{
+									"key": "ordering",
+									"value": "price",
+									"description": "Order by field (price, -price, creation_date, -creation_date)"
+								}
+							]
+						},
+						"description": "Get a list of product variants with advanced filtering.\n\n**Authentication:** Bearer Token (JWT)\n\n**Available filters:**\n- base_product, base_product__slug, base_product__model_name\n- condition (nuevo, open_box, refurbished, usado)\n- stock_status (en_stock, en_camino, por_importacion, sin_stock)\n- is_published, active\n- price_min, price_max\n\n**Ordering:** ?ordering=price or ?ordering=-price"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Product Variant Detail",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/products/variants/detail/:id/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"products",
+								"variants",
+								"detail",
+								":id",
+								""
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1",
+									"description": "Product Variant ID"
+								}
+							]
+						},
+						"description": "Get detailed information of a specific product variant.\n\n**Authentication:** Bearer Token (JWT)\n\n**Returns:**\n- Variant information (price, condition, stock status)\n- Complete base product information\n- Brand and categories\n- Product images"
+					},
+					"response": []
+				},
+				{
+					"name": "Create Product Variant",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"base_product\": 1,\n    \"price\": 1500000,\n    \"condition\": \"nuevo\",\n    \"stock_status\": \"en_stock\",\n    \"is_published\": true\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/products/variants/create/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"products",
+								"variants",
+								"create",
+								""
+							]
+						},
+						"description": "Create a new product variant.\n\n**Authentication:** Bearer Token (JWT)\n\n**Body (all required):**\n- base_product: Base product ID\n- price: Variant price (positive integer)\n- condition: nuevo | open_box | refurbished | usado\n- stock_status: en_stock | en_camino | por_importacion | sin_stock\n- is_published: true | false"
+					},
+					"response": []
+				},
+				{
+					"name": "Update Product Variant",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"price\": 1800000,\n    \"stock_status\": \"en_camino\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/products/variants/update/:id/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"products",
+								"variants",
+								"update",
+								":id",
+								""
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1",
+									"description": "Product Variant ID"
+								}
+							]
+						},
+						"description": "Update product variant information.\n\n**Authentication:** Bearer Token (JWT)\n\n**Body (all optional):**\n- base_product: Base product ID\n- price: Variant price\n- condition: nuevo | open_box | refurbished | usado\n- stock_status: en_stock | en_camino | por_importacion | sin_stock\n- is_published: true | false"
+					},
+					"response": []
+				},
+				{
+					"name": "Activate Product Variant",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/products/variants/activate/:id/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"products",
+								"variants",
+								"activate",
+								":id",
+								""
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1",
+									"description": "Product Variant ID"
+								}
+							]
+						},
+						"description": "Activate a product variant.\n\n**Authentication:** Bearer Token (JWT)"
+					},
+					"response": []
+				},
+				{
+					"name": "Deactivate Product Variant",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/products/variants/deactivate/:id/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"products",
+								"variants",
+								"deactivate",
+								":id",
+								""
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "1",
+									"description": "Product Variant ID"
+								}
+							]
+						},
+						"description": "Deactivate a product variant.\n\n**Authentication:** Bearer Token (JWT)"
+					},
+					"response": []
+				}
+			],
+			"description": "Product Variant management endpoints with filtering by price, condition, and stock status."
+		}
+	],
+	"auth": {
+		"type": "bearer",
+		"bearer": [
+			{
+				"key": "token",
+				"value": "{{access_token}}",
+				"type": "string"
+			}
+		]
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8000",
+			"type": "string"
+		},
+		{
+			"key": "access_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "refresh_token",
+			"value": "",
+			"type": "string"
 		}
 	]
 }

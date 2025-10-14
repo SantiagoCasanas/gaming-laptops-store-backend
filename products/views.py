@@ -1,13 +1,14 @@
 from rest_framework import status
 from rest_framework.response import Response
-from rest_framework.generics import ListAPIView, CreateAPIView, UpdateAPIView
+from rest_framework.generics import ListAPIView, CreateAPIView, UpdateAPIView, RetrieveAPIView
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.shortcuts import get_object_or_404
-from .models import Brand, Category, BaseProduct
+from django.db import transaction
+from .models import Brand, Category, BaseProduct, ProductVariant
 from .serializers import (
     BrandSerializer,
     BrandCreateSerializer,
@@ -17,9 +18,12 @@ from .serializers import (
     CategoryUpdateSerializer,
     BaseProductSerializer,
     BaseProductCreateSerializer,
-    BaseProductUpdateSerializer
+    BaseProductUpdateSerializer,
+    ProductVariantSerializer,
+    ProductVariantCreateSerializer,
+    ProductVariantUpdateSerializer
 )
-from .filters import BaseProductFilter
+from .filters import BaseProductFilter, ProductVariantFilter
 
 
 class BrandListView(ListAPIView):
@@ -299,6 +303,42 @@ class BaseProductListView(ListAPIView):
     ordering = ['-creation_date']
 
 
+class BaseProductDetailView(RetrieveAPIView):
+    """
+    View to retrieve a single BaseProduct by ID or slug.
+
+    GET: Returns detailed information of a specific product including:
+    - Product information (model name, description, specs)
+    - Related brand information
+    - Related categories
+    - All associated images
+
+    Requires JWT authentication via Bearer token.
+
+    You can retrieve by:
+    - ID: /products/base-products/1/
+    - Slug: /products/base-products/lenovo-loq-156/
+    """
+    queryset = BaseProduct.objects.all().select_related('brand').prefetch_related('categories', 'images')
+    serializer_class = BaseProductSerializer
+    permission_classes = [IsAuthenticated]
+    lookup_field = 'pk'
+
+    def get_object(self):
+        """
+        Override to allow lookup by both pk and slug.
+        First tries pk, then falls back to slug if pk is not a number.
+        """
+        lookup_value = self.kwargs.get(self.lookup_field)
+
+        # Try to get by pk first (if it's a number)
+        if lookup_value.isdigit():
+            return get_object_or_404(self.queryset, pk=lookup_value)
+
+        # Otherwise, try to get by slug
+        return get_object_or_404(self.queryset, slug=lookup_value)
+
+
 class BaseProductCreateView(CreateAPIView):
     """
     View to create a new BaseProduct with images.
@@ -332,7 +372,8 @@ class BaseProductCreateView(CreateAPIView):
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
-    def create(self, request, *args, **kwargs):
+    @transaction.atomic
+    def create(self, request, *args, **kwargs):        
         serializer = self.get_serializer(data=request.data, context={'request': request})
         serializer.is_valid(raise_exception=True)
         base_product = serializer.save()
@@ -360,9 +401,11 @@ class BaseProductUpdateView(UpdateAPIView):
     parser_classes = [MultiPartParser, FormParser, JSONParser]
     lookup_field = 'pk'
 
+    @transaction.atomic
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop('partial', False)
         instance = self.get_object()
+
         serializer = self.get_serializer(instance, data=request.data, partial=partial, context={'request': request})
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
@@ -422,4 +465,232 @@ class BaseProductDeactivateView(APIView):
         return Response({
             'message': 'Product deactivated successfully',
             'product': BaseProductSerializer(product).data
+        }, status=status.HTTP_200_OK)
+
+
+# ProductVariant Views
+
+class ProductVariantListView(ListAPIView):
+    """
+    View to list and filter ProductVariants.
+
+    GET: Returns a list of product variants with advanced filtering capabilities.
+    Requires JWT authentication via Bearer token.
+
+    Available filters (via query parameters):
+    - ?base_product=1 (base product ID)
+    - ?base_product__slug=lenovo-loq (base product slug, partial match)
+    - ?base_product__model_name=lenovo (base product model name, partial match)
+    - ?condition=nuevo (condition: nuevo, open_box, refurbished, usado)
+    - ?stock_status=en_stock (stock status: en_stock, en_camino, por_importacion, sin_stock)
+    - ?is_published=true (published status)
+    - ?active=true (active status)
+    - ?price_min=500000 (minimum price)
+    - ?price_max=2000000 (maximum price)
+
+    Ordering:
+    - ?ordering=price (ascending by price)
+    - ?ordering=-price (descending by price)
+    - Available fields: price, creation_date, update_date
+
+    Example:
+    /products/variants/?base_product=1&condition=nuevo&price_min=1000000&price_max=2000000&ordering=price
+    """
+    queryset = ProductVariant.objects.all().select_related('base_product__brand').prefetch_related('base_product__categories', 'base_product__images')
+    serializer_class = ProductVariantSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_class = ProductVariantFilter
+    ordering_fields = ['price', 'creation_date', 'update_date']
+    ordering = ['price']
+
+
+class ProductVariantDetailView(RetrieveAPIView):
+    """
+    View to retrieve a single ProductVariant by ID.
+
+    GET: Returns detailed information of a specific product variant including:
+    - Variant information (price, condition, stock status, published status)
+    - Related base product information (with brand, categories, images)
+
+    Requires JWT authentication via Bearer token.
+    """
+    queryset = ProductVariant.objects.all().select_related('base_product__brand').prefetch_related('base_product__categories', 'base_product__images')
+    serializer_class = ProductVariantSerializer
+    permission_classes = [IsAuthenticated]
+    lookup_field = 'pk'
+
+
+class ProductVariantCreateView(CreateAPIView):
+    """
+    View to create a new ProductVariant.
+
+    POST: Creates a new product variant with the provided data.
+    Requires JWT authentication via Bearer token.
+
+    Expected fields:
+    - base_product: Base product ID (required)
+    - price: Variant price (required, must be positive)
+    - condition: Product condition (required, choices: nuevo, open_box, refurbished, usado)
+    - stock_status: Stock status (required, choices: en_stock, en_camino, por_importacion, sin_stock)
+    - is_published: Visibility status (required, boolean)
+
+    Example:
+    {
+        "base_product": 1,
+        "price": 1500000,
+        "condition": "nuevo",
+        "stock_status": "en_stock",
+        "is_published": true
+    }
+    """
+    serializer_class = ProductVariantCreateSerializer
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        product_variant = serializer.save()
+
+        return Response({
+            'message': 'Product variant created successfully',
+            'product_variant': ProductVariantSerializer(product_variant).data
+        }, status=status.HTTP_201_CREATED)
+
+
+class ProductVariantUpdateView(UpdateAPIView):
+    """
+    View to update ProductVariant information.
+
+    PATCH/PUT: Updates product variant information.
+    Requires JWT authentication via Bearer token.
+
+    All fields are optional for partial updates:
+    - base_product: Base product ID
+    - price: Variant price (must be positive)
+    - condition: Product condition (choices: nuevo, open_box, refurbished, usado)
+    - stock_status: Stock status (choices: en_stock, en_camino, por_importacion, sin_stock)
+    - is_published: Visibility status (boolean)
+    """
+    queryset = ProductVariant.objects.all()
+    serializer_class = ProductVariantUpdateSerializer
+    permission_classes = [IsAuthenticated]
+    lookup_field = 'pk'
+
+    @transaction.atomic
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+
+        return Response({
+            'message': 'Product variant updated successfully',
+            'product_variant': ProductVariantSerializer(instance).data
+        }, status=status.HTTP_200_OK)
+
+
+class ProductVariantActivateView(APIView):
+    """
+    View to activate a ProductVariant.
+
+    POST: Sets active=True for the specified product variant.
+    Requires JWT authentication via Bearer token.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        variant = get_object_or_404(ProductVariant, pk=pk)
+
+        if variant.active:
+            return Response({
+                'message': 'Product variant is already active'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        variant.active = True
+        variant.save()
+
+        return Response({
+            'message': 'Product variant activated successfully',
+            'product_variant': ProductVariantSerializer(variant).data
+        }, status=status.HTTP_200_OK)
+
+
+class ProductVariantDeactivateView(APIView):
+    """
+    View to deactivate a ProductVariant.
+
+    POST: Sets active=False for the specified product variant.
+    Requires JWT authentication via Bearer token.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        variant = get_object_or_404(ProductVariant, pk=pk)
+
+        if not variant.active:
+            return Response({
+                'message': 'Product variant is already inactive'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        variant.active = False
+        variant.save()
+
+        return Response({
+            'message': 'Product variant deactivated successfully',
+            'product_variant': ProductVariantSerializer(variant).data
+        }, status=status.HTTP_200_OK)
+
+
+class ProductVariantPublishView(APIView):
+    """
+    View to publish a ProductVariant (make it visible in the store).
+
+    POST: Sets is_published=True for the specified product variant.
+    Requires JWT authentication via Bearer token.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        variant = get_object_or_404(ProductVariant, pk=pk)
+
+        if variant.is_published:
+            return Response({
+                'message': 'Product variant is already published'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        variant.is_published = True
+        variant.save()
+
+        return Response({
+            'message': 'Product variant published successfully',
+            'product_variant': ProductVariantSerializer(variant).data
+        }, status=status.HTTP_200_OK)
+
+
+class ProductVariantUnpublishView(APIView):
+    """
+    View to unpublish a ProductVariant (hide it from the store).
+
+    POST: Sets is_published=False for the specified product variant.
+    Requires JWT authentication via Bearer token.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        variant = get_object_or_404(ProductVariant, pk=pk)
+
+        if not variant.is_published:
+            return Response({
+                'message': 'Product variant is already unpublished'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        variant.is_published = False
+        variant.save()
+
+        return Response({
+            'message': 'Product variant unpublished successfully',
+            'product_variant': ProductVariantSerializer(variant).data
         }, status=status.HTTP_200_OK)

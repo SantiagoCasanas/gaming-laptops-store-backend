@@ -11,31 +11,49 @@ from .views import (
     CategoryActivateView,
     CategoryDeactivateView,
     BaseProductListView,
+    BaseProductDetailView,
     BaseProductCreateView,
     BaseProductUpdateView,
     BaseProductActivateView,
-    BaseProductDeactivateView
+    BaseProductDeactivateView,
+    ProductVariantListView,
+    ProductVariantDetailView,
+    ProductVariantCreateView,
+    ProductVariantUpdateView,
+    ProductVariantActivateView,
+    ProductVariantDeactivateView,
+    ProductVariantPublishView,
+    ProductVariantUnpublishView
 )
 
 urlpatterns = [
     # Brand endpoints
-    path('brands/', BrandListView.as_view(), name='brand_list'),
+    path('brands/list/', BrandListView.as_view(), name='brand_list'),
     path('brands/create/', BrandCreateView.as_view(), name='brand_create'),
     path('brands/update/<int:pk>/', BrandUpdateView.as_view(), name='brand_update'),
     path('brands/activate/<int:pk>/', BrandActivateView.as_view(), name='brand_activate'),
     path('brands/deactivate/<int:pk>/', BrandDeactivateView.as_view(), name='brand_deactivate'),
 
     # Category endpoints
-    path('categories/', CategoryListView.as_view(), name='category_list'),
+    path('categories/list/', CategoryListView.as_view(), name='category_list'),
     path('categories/create/', CategoryCreateView.as_view(), name='category_create'),
     path('categories/update/<int:pk>/', CategoryUpdateView.as_view(), name='category_update'),
     path('categories/activate/<int:pk>/', CategoryActivateView.as_view(), name='category_activate'),
     path('categories/deactivate/<int:pk>/', CategoryDeactivateView.as_view(), name='category_deactivate'),
 
     # BaseProduct endpoints
-    path('base-products/', BaseProductListView.as_view(), name='baseproduct_list'),
+    path('base-products/list/', BaseProductListView.as_view(), name='baseproduct_list'),
+    path('base-products/detail/<str:pk>/', BaseProductDetailView.as_view(), name='baseproduct_detail'),
     path('base-products/create/', BaseProductCreateView.as_view(), name='baseproduct_create'),
     path('base-products/update/<int:pk>/', BaseProductUpdateView.as_view(), name='baseproduct_update'),
     path('base-products/activate/<int:pk>/', BaseProductActivateView.as_view(), name='baseproduct_activate'),
     path('base-products/deactivate/<int:pk>/', BaseProductDeactivateView.as_view(), name='baseproduct_deactivate'),
+
+    # ProductVariant endpoints
+    path('variants/list/', ProductVariantListView.as_view(), name='productvariant_list'),
+    path('variants/detail/<int:pk>/', ProductVariantDetailView.as_view(), name='productvariant_detail'),
+    path('variants/create/', ProductVariantCreateView.as_view(), name='productvariant_create'),
+    path('variants/update/<int:pk>/', ProductVariantUpdateView.as_view(), name='productvariant_update'),
+    path('variants/activate/<int:pk>/', ProductVariantActivateView.as_view(), name='productvariant_activate'),
+    path('variants/deactivate/<int:pk>/', ProductVariantDeactivateView.as_view(), name='productvariant_deactivate'),
 ]
