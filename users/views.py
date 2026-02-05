@@ -3,9 +3,11 @@ from rest_framework.response import Response
 from rest_framework.generics import GenericAPIView, ListAPIView, UpdateAPIView, CreateAPIView
 from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework_simplejwt.tokens import RefreshToken
 from django.shortcuts import get_object_or_404
 from .serializers import LoginSerializer, UserSerializer, UserUpdateSerializer, UserCreateSerializer
 from .models import User
+
 
 
 class LoginView(GenericAPIView):
@@ -17,23 +19,41 @@ class LoginView(GenericAPIView):
     serializer_class = LoginSerializer
     permission_classes = [AllowAny]
 
-    def post(self, request, *args, **kwargs):
+    def post(self, request):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         user = serializer.validated_data['user']
-        tokens = serializer.get_tokens(user)
+        refresh = RefreshToken.for_user(user)
 
         return Response({
-            'access': tokens['access'],
-            'refresh': tokens['refresh'],
+            'access': str(refresh.access_token),
+            'refresh': str(refresh),
             'user': {
                 'id': user.id,
                 'email': user.email,
                 'first_name': user.first_name,
                 'last_name': user.last_name,
             }
-        }, status=status.HTTP_200_OK)
+        })
+
+
+class LogoutView(APIView):
+    """
+    View to log out a user.
+
+    POST: Logs out the user by blacklisting the refresh token.
+    Requires authentication.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        try:
+            refresh = RefreshToken(request.data.get('refresh'))
+            refresh.blacklist()
+            return Response(status=204)
+        except Exception:
+            return Response(status=400)
 
 
 class UserCreateView(CreateAPIView):
@@ -41,7 +61,7 @@ class UserCreateView(CreateAPIView):
     View to register a new user.
 
     POST: Creates a new user with the provided data.
-    Does not require authentication (public endpoint).
+    requires authentication.
     """
     serializer_class = UserCreateSerializer
     permission_classes = [IsAuthenticated]
