@@ -2,7 +2,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.generics import ListAPIView, CreateAPIView, UpdateAPIView, RetrieveAPIView
 from rest_framework.views import APIView
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
@@ -498,7 +498,7 @@ class ProductVariantListView(ListAPIView):
     """
     queryset = ProductVariant.objects.all().select_related('base_product__brand').prefetch_related('base_product__categories', 'base_product__images')
     serializer_class = ProductVariantSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_class = ProductVariantFilter
     ordering_fields = ['price', 'creation_date', 'update_date']
@@ -517,7 +517,7 @@ class ProductVariantDetailView(RetrieveAPIView):
     """
     queryset = ProductVariant.objects.all().select_related('base_product__brand').prefetch_related('base_product__categories', 'base_product__images')
     serializer_class = ProductVariantSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     lookup_field = 'pk'
 
 
