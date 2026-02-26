@@ -124,6 +124,7 @@ class Image(BaseModel):
     base_product = models.ForeignKey(BaseProduct, on_delete=models.ProtectedError, related_name="images", help_text="Variant to which the image belongs")
     imagen = models.ImageField(upload_to=get_image_upload_path, help_text="Product' image")
     alt_text = models.CharField(max_length=255, blank=True, null=True, help_text="Texto alternativo para la imagen (SEO)")
+    order = models.PositiveSmallIntegerField(default=0, help_text="Display order of the image")
 
     class Meta:
         verbose_name = "Imagen"

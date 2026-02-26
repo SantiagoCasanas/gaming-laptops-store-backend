@@ -100,26 +100,38 @@ class ImageSerializer(serializers.ModelSerializer):
     """
     class Meta:
         model = Image
-        fields = ['id', 'imagen', 'alt_text', 'active']
+        fields = ['id', 'imagen', 'alt_text', 'order', 'active']
         read_only_fields = ['id']
 
 
 class BaseProductCreateSerializer(serializers.ModelSerializer):
     """
     Serializer for creating a new BaseProduct with images.
-    Accepts up to 4 images as file uploads.
+    Accepts up to 10 images as file uploads via flat indexed fields (image_0..image_9).
     """
-    # Image fields for file uploads (up to 4 images)
+    # Image fields for file uploads (up to 10 images)
+    image_0 = serializers.ImageField(write_only=True, required=False, allow_null=True)
     image_1 = serializers.ImageField(write_only=True, required=False, allow_null=True)
     image_2 = serializers.ImageField(write_only=True, required=False, allow_null=True)
     image_3 = serializers.ImageField(write_only=True, required=False, allow_null=True)
     image_4 = serializers.ImageField(write_only=True, required=False, allow_null=True)
+    image_5 = serializers.ImageField(write_only=True, required=False, allow_null=True)
+    image_6 = serializers.ImageField(write_only=True, required=False, allow_null=True)
+    image_7 = serializers.ImageField(write_only=True, required=False, allow_null=True)
+    image_8 = serializers.ImageField(write_only=True, required=False, allow_null=True)
+    image_9 = serializers.ImageField(write_only=True, required=False, allow_null=True)
 
     # Alt text for each image
+    alt_text_0 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
     alt_text_1 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
     alt_text_2 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
     alt_text_3 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
     alt_text_4 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
+    alt_text_5 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
+    alt_text_6 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
+    alt_text_7 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
+    alt_text_8 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
+    alt_text_9 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
 
     # Categories as list of IDs
     categories = serializers.ListField(
@@ -137,8 +149,10 @@ class BaseProductCreateSerializer(serializers.ModelSerializer):
             'brand',
             'categories',
             'specs',
-            'image_1', 'image_2', 'image_3', 'image_4',
-            'alt_text_1', 'alt_text_2', 'alt_text_3', 'alt_text_4'
+            'image_0', 'image_1', 'image_2', 'image_3', 'image_4',
+            'image_5', 'image_6', 'image_7', 'image_8', 'image_9',
+            'alt_text_0', 'alt_text_1', 'alt_text_2', 'alt_text_3', 'alt_text_4',
+            'alt_text_5', 'alt_text_6', 'alt_text_7', 'alt_text_8', 'alt_text_9',
         ]
         extra_kwargs = {
             'specs': {'required': True},
@@ -163,20 +177,32 @@ class BaseProductCreateSerializer(serializers.ModelSerializer):
         return value
 
     def validate_specs(self, value):
-        """Validate that specs is a valid JSON object."""
+        """Validate that specs is a valid JSON object (handles multipart string input)."""
+        if isinstance(value, str):
+            import json
+            try:
+                value = json.loads(value)
+            except json.JSONDecodeError:
+                raise serializers.ValidationError("Specs must be a valid JSON object.")
         if not isinstance(value, dict):
             raise serializers.ValidationError("Specs must be a valid JSON object.")
         return value
+
+    def validate(self, data):
+        count = sum(1 for i in range(10) if data.get(f'image_{i}'))
+        if count > 10:
+            raise serializers.ValidationError({"images": "A maximum of 10 images is allowed."})
+        return data
 
     def create(self, validated_data):
         """Create BaseProduct with images."""
         # Extract image data
         images_data = []
-        for i in range(1, 5):
+        for i in range(10):
             image_file = validated_data.pop(f'image_{i}', None)
             alt_text = validated_data.pop(f'alt_text_{i}', '')
             if image_file:
-                images_data.append({'imagen': image_file, 'alt_text': alt_text})
+                images_data.append({'imagen': image_file, 'alt_text': alt_text, 'order': i})
 
         # Extract categories
         category_ids = validated_data.pop('categories')
@@ -192,7 +218,6 @@ class BaseProductCreateSerializer(serializers.ModelSerializer):
 
         # Add categories
         base_product.categories.set(category_ids)
-        print(images_data)
 
         # Create images
         for image_data in images_data:
@@ -233,19 +258,32 @@ class BaseProductSerializer(serializers.ModelSerializer):
 class BaseProductUpdateSerializer(serializers.ModelSerializer):
     """
     Serializer for updating BaseProduct.
-    Allows updating images by adding/removing them.
+    Allows updating images by adding/removing/reordering them.
+    Accepts up to 10 new images via flat indexed fields (image_0..image_9).
     """
-    # Image fields for file uploads (up to 4 new images)
+    # Image fields for file uploads (up to 10 new images)
+    image_0 = serializers.ImageField(write_only=True, required=False, allow_null=True)
     image_1 = serializers.ImageField(write_only=True, required=False, allow_null=True)
     image_2 = serializers.ImageField(write_only=True, required=False, allow_null=True)
     image_3 = serializers.ImageField(write_only=True, required=False, allow_null=True)
     image_4 = serializers.ImageField(write_only=True, required=False, allow_null=True)
+    image_5 = serializers.ImageField(write_only=True, required=False, allow_null=True)
+    image_6 = serializers.ImageField(write_only=True, required=False, allow_null=True)
+    image_7 = serializers.ImageField(write_only=True, required=False, allow_null=True)
+    image_8 = serializers.ImageField(write_only=True, required=False, allow_null=True)
+    image_9 = serializers.ImageField(write_only=True, required=False, allow_null=True)
 
     # Alt text for each image
+    alt_text_0 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
     alt_text_1 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
     alt_text_2 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
     alt_text_3 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
     alt_text_4 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
+    alt_text_5 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
+    alt_text_6 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
+    alt_text_7 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
+    alt_text_8 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
+    alt_text_9 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
 
     # Categories as list of IDs
     categories = serializers.ListField(
@@ -263,6 +301,9 @@ class BaseProductUpdateSerializer(serializers.ModelSerializer):
         help_text="List of image IDs to remove"
     )
 
+    # Reorder existing images: JSON string "[{\"id\": 5, \"order\": 0}, ...]"
+    reorder_data = serializers.CharField(write_only=True, required=False, allow_blank=True)
+
     class Meta:
         model = BaseProduct
         fields = [
@@ -271,9 +312,12 @@ class BaseProductUpdateSerializer(serializers.ModelSerializer):
             'brand',
             'categories',
             'specs',
-            'image_1', 'image_2', 'image_3', 'image_4',
-            'alt_text_1', 'alt_text_2', 'alt_text_3', 'alt_text_4',
-            'remove_images'
+            'image_0', 'image_1', 'image_2', 'image_3', 'image_4',
+            'image_5', 'image_6', 'image_7', 'image_8', 'image_9',
+            'alt_text_0', 'alt_text_1', 'alt_text_2', 'alt_text_3', 'alt_text_4',
+            'alt_text_5', 'alt_text_6', 'alt_text_7', 'alt_text_8', 'alt_text_9',
+            'remove_images',
+            'reorder_data',
         ]
         extra_kwargs = {
             'model_name': {'required': False},
@@ -297,20 +341,38 @@ class BaseProductUpdateSerializer(serializers.ModelSerializer):
         return value
 
     def validate_specs(self, value):
-        """Validate that specs is a valid JSON object."""
+        """Validate that specs is a valid JSON object (handles multipart string input)."""
+        if isinstance(value, str):
+            import json
+            try:
+                value = json.loads(value)
+            except json.JSONDecodeError:
+                raise serializers.ValidationError("Specs must be a valid JSON object.")
         if value is not None and not isinstance(value, dict):
             raise serializers.ValidationError("Specs must be a valid JSON object.")
         return value
 
     def update(self, instance, validated_data):
         """Update BaseProduct with new data and handle images."""
+        import json
+
         # Extract image data
         images_data = []
-        for i in range(1, 5):
+        for i in range(10):
             image_file = validated_data.pop(f'image_{i}', None)
             alt_text = validated_data.pop(f'alt_text_{i}', '')
             if image_file:
-                images_data.append({'imagen': image_file, 'alt_text': alt_text})
+                images_data.append({'imagen': image_file, 'alt_text': alt_text, 'slot': i})
+
+        # Apply reorder to existing images
+        reorder_raw = validated_data.pop('reorder_data', '')
+        if reorder_raw:
+            try:
+                reorder_list = json.loads(reorder_raw)
+                for entry in reorder_list:
+                    Image.objects.filter(id=entry['id'], base_product=instance).update(order=entry['order'])
+            except (json.JSONDecodeError, KeyError):
+                pass
 
         # Handle image removal
         remove_images = validated_data.pop('remove_images', [])
@@ -335,10 +397,13 @@ class BaseProductUpdateSerializer(serializers.ModelSerializer):
         if category_ids is not None:
             instance.categories.set(category_ids)
 
-        # Add new images
-        for image_data in images_data:
+        # Add new images — order starts after existing kept images
+        existing_count = instance.images.count()
+        for idx, image_data in enumerate(images_data):
+            slot = image_data.pop('slot')
             Image.objects.create(
                 base_product=instance,
+                order=existing_count + idx,
                 **image_data
             )
 
