@@ -103,7 +103,6 @@ DATABASES = {
         default=os.getenv('DATABASE_URL')
     )
 }
-
 # Media files configuration (uploads)
 if DEBUG:
     MEDIA_URL = '/media/'
@@ -116,7 +115,7 @@ else:
     AWS_S3_ENDPOINT_URL = os.getenv('R2_ENDPOINT_URL')
     AWS_S3_FILE_OVERWRITE = False
     AWS_DEFAULT_ACL = 'public-read'
-    MEDIA_URL = os.getenv('R2_PUBLIC_URL')
+    MEDIA_URL = os.getenv('R2_PUBLIC_URL', '').rstrip('/') + '/'
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
 
