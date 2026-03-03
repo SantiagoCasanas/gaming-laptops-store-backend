@@ -56,11 +56,9 @@ def _read_locally(file_path: str) -> bytes:
 # ─────────────────────────────────────────────
 
 def _get_r2_client():
-    account_id = settings.CLOUDFLARE_ACCOUNT_ID
-    endpoint_url = f"https://{account_id}.r2.cloudflarestorage.com"
     return boto3.client(
         's3',
-        endpoint_url=endpoint_url,
+        endpoint_url=settings.AWS_S3_ENDPOINT_URL,
         aws_access_key_id=settings.R2_ACCESS_KEY_ID,
         aws_secret_access_key=settings.R2_SECRET_ACCESS_KEY,
         region_name='auto',
