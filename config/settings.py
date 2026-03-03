@@ -61,6 +61,7 @@ INSTALLED_APPS = [
     'core',
     'products',
     'users',
+    'sales',
 ]
 
 MIDDLEWARE = [
@@ -206,6 +207,15 @@ SIMPLE_JWT = {
     'ALGORITHM': 'HS256',
     'SIGNING_KEY': SECRET_KEY,
 }
+
+# Resend (transactional email)
+RESEND_API_KEY = os.getenv('RESEND_API_KEY', '')
+
+# Cloudflare R2 (for sales invoice uploads — also used by django-storages in production)
+CLOUDFLARE_ACCOUNT_ID = os.getenv('CLOUDFLARE_ACCOUNT_ID', '')
+R2_ACCESS_KEY_ID = os.getenv('R2_ACCESS_KEY_ID', '')
+R2_SECRET_ACCESS_KEY = os.getenv('R2_SECRET_ACCESS_KEY', '')
+R2_BUCKET_NAME = os.getenv('R2_BUCKET_NAME', '')
 
 # Celery
 CELERY_BROKER_URL = os.getenv('REDIS_URL', 'redis://localhost:6379/0')

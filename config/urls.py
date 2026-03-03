@@ -25,6 +25,7 @@ urlpatterns = [
     path('api/health/', lambda request: JsonResponse({"status": "ok"})),
     path('user/', include('users.urls')),
     path('products/', include('products.urls')),
+    path('sales/', include('sales.urls')),
 ]
 
 if settings.DEBUG:

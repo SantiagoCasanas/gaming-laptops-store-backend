@@ -1,3 +1,5 @@
+python-docx==1.2.0
+resend==2.23.0
 amqp==5.3.1
 asgiref==3.9.1
 billiard==4.2.4
