@@ -23,9 +23,11 @@ from django.http import JsonResponse
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/health/', lambda request: JsonResponse({"status": "ok"})),
+    path('core/', include('core.urls')),
     path('user/', include('users.urls')),
     path('products/', include('products.urls')),
     path('sales/', include('sales.urls')),
+    path('purchases/', include('purchases.urls')),
 ]
 
 if settings.DEBUG:

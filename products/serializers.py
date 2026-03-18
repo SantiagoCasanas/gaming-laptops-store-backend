@@ -1,5 +1,10 @@
 from rest_framework import serializers
-from .models import Brand, Category, BaseProduct, Image, ProductVariant
+from django.db import transaction
+from .models import (
+    Brand, Category, TipoProducto, CampoProducto, TipoProductoCampo, Proveedor,
+    Producto, ProductoCategoria, ProductoCampoValor, ImagenProducto,
+    BajoPedido, Descuento, UnidadProducto
+)
 
 
 class BrandSerializer(serializers.ModelSerializer):
@@ -92,438 +97,1008 @@ class CategoryUpdateSerializer(serializers.ModelSerializer):
         return instance
 
 
-# BaseProduct Serializers
+# TipoProducto Serializers
 
-class ImageSerializer(serializers.ModelSerializer):
+class TipoProductoSerializer(serializers.ModelSerializer):
     """
-    Serializer for Image model.
+    Serializer for TipoProducto model.
+    Used for listing and retrieving product type information.
     """
     class Meta:
-        model = Image
-        fields = ['id', 'imagen', 'alt_text', 'order', 'active']
-        read_only_fields = ['id']
+        model = TipoProducto
+        fields = ['id', 'nombre', 'descripcion', 'active']
 
 
-class BaseProductCreateSerializer(serializers.ModelSerializer):
+class TipoProductoCampoWriteSerializer(serializers.Serializer):
     """
-    Serializer for creating a new BaseProduct with images.
-    Accepts up to 10 images as file uploads via flat indexed fields (image_0..image_9).
+    Nested serializer representing one field association in a create/update request.
+    Accepts the CampoProducto id, an optional display order, and a required flag.
+    The required flag is stored on the association (TipoProductoCampo), not on the
+    field itself, implementing Option B (per-association required constraint).
     """
-    # Image fields for file uploads (up to 10 images)
-    image_0 = serializers.ImageField(write_only=True, required=False, allow_null=True)
-    image_1 = serializers.ImageField(write_only=True, required=False, allow_null=True)
-    image_2 = serializers.ImageField(write_only=True, required=False, allow_null=True)
-    image_3 = serializers.ImageField(write_only=True, required=False, allow_null=True)
-    image_4 = serializers.ImageField(write_only=True, required=False, allow_null=True)
-    image_5 = serializers.ImageField(write_only=True, required=False, allow_null=True)
-    image_6 = serializers.ImageField(write_only=True, required=False, allow_null=True)
-    image_7 = serializers.ImageField(write_only=True, required=False, allow_null=True)
-    image_8 = serializers.ImageField(write_only=True, required=False, allow_null=True)
-    image_9 = serializers.ImageField(write_only=True, required=False, allow_null=True)
+    id = serializers.IntegerField()
+    orden = serializers.IntegerField(default=0)
+    required = serializers.BooleanField(default=False)
 
-    # Alt text for each image
-    alt_text_0 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
-    alt_text_1 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
-    alt_text_2 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
-    alt_text_3 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
-    alt_text_4 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
-    alt_text_5 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
-    alt_text_6 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
-    alt_text_7 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
-    alt_text_8 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
-    alt_text_9 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
 
-    # Categories as list of IDs
-    categories = serializers.ListField(
-        child=serializers.IntegerField(),
-        write_only=True,
-        required=True,
-        help_text="List of category IDs"
-    )
+class TipoProductoCreateSerializer(serializers.ModelSerializer):
+    """
+    Serializer for creating a new product type with optional field associations.
+    Accepts a 'campos' list of {id, orden} entries that are created atomically
+    together with the product type.
+    """
+    campos = TipoProductoCampoWriteSerializer(many=True, required=False, write_only=True)
 
     class Meta:
-        model = BaseProduct
-        fields = [
-            'model_name',
-            'long_description',
-            'brand',
-            'categories',
-            'specs',
-            'image_0', 'image_1', 'image_2', 'image_3', 'image_4',
-            'image_5', 'image_6', 'image_7', 'image_8', 'image_9',
-            'alt_text_0', 'alt_text_1', 'alt_text_2', 'alt_text_3', 'alt_text_4',
-            'alt_text_5', 'alt_text_6', 'alt_text_7', 'alt_text_8', 'alt_text_9',
-        ]
+        model = TipoProducto
+        fields = ['nombre', 'descripcion', 'campos']
         extra_kwargs = {
-            'specs': {'required': True},
+            'descripcion': {'required': False}
         }
-
-    def validate_categories(self, value):
-        """Validate that at least one category is provided and all exist."""
-        if not value:
-            raise serializers.ValidationError("At least one category is required.")
-
-        # Check if all category IDs exist
-        existing_categories = Category.objects.filter(id__in=value, active=True)
-        if existing_categories.count() != len(value):
-            raise serializers.ValidationError("One or more category IDs are invalid or inactive.")
-
-        return value
-
-    def validate_brand(self, value):
-        """Validate that the brand is active."""
-        if not value.active:
-            raise serializers.ValidationError("The selected brand is inactive.")
-        return value
-
-    def validate_specs(self, value):
-        """Validate that specs is a valid JSON object (handles multipart string input)."""
-        if isinstance(value, str):
-            import json
-            try:
-                value = json.loads(value)
-            except json.JSONDecodeError:
-                raise serializers.ValidationError("Specs must be a valid JSON object.")
-        if not isinstance(value, dict):
-            raise serializers.ValidationError("Specs must be a valid JSON object.")
-        return value
-
-    def validate(self, data):
-        count = sum(1 for i in range(10) if data.get(f'image_{i}'))
-        if count > 10:
-            raise serializers.ValidationError({"images": "A maximum of 10 images is allowed."})
-        return data
 
     def create(self, validated_data):
-        """Create BaseProduct with images."""
-        # Extract image data
-        images_data = []
-        for i in range(10):
-            image_file = validated_data.pop(f'image_{i}', None)
-            alt_text = validated_data.pop(f'alt_text_{i}', '')
-            if image_file:
-                images_data.append({'imagen': image_file, 'alt_text': alt_text, 'order': i})
+        """Create product type and field associations atomically."""
+        from django.db import transaction
 
-        # Extract categories
-        category_ids = validated_data.pop('categories')
+        campos_data = validated_data.pop('campos', [])
 
-        # Get user from context
-        user = self.context['request'].user
+        with transaction.atomic():
+            tipo_producto = TipoProducto.objects.create(**validated_data)
 
-        # Create BaseProduct
-        base_product = BaseProduct.objects.create(
-            **validated_data,
-            user_last_modified=user
-        )
+            if campos_data:
+                campo_ids = [f['id'] for f in campos_data]
+                found_ids = set(
+                    CampoProducto.objects.filter(id__in=campo_ids).values_list('id', flat=True)
+                )
+                missing = set(campo_ids) - found_ids
+                if missing:
+                    raise serializers.ValidationError({
+                        'campos': f'Product field(s) with id(s) {sorted(missing)} not found.'
+                    })
 
-        # Add categories
-        base_product.categories.set(category_ids)
+                for field_data in campos_data:
+                    TipoProductoCampo.objects.create(
+                        tipo_producto=tipo_producto,
+                        campo_producto_id=field_data['id'],
+                        orden=field_data.get('orden', 0),
+                        required=field_data.get('required', False),
+                    )
 
-        # Create images
-        for image_data in images_data:
-            Image.objects.create(
-                base_product=base_product,
-                **image_data
-            )
-
-        return base_product
+        return tipo_producto
 
 
-class BaseProductSerializer(serializers.ModelSerializer):
+class TipoProductoUpdateSerializer(serializers.ModelSerializer):
     """
-    Serializer for BaseProduct listing and retrieval.
-    Includes related brand, categories, and images.
+    Serializer for updating a product type and atomically replacing its field associations.
+    When 'campos' is provided the existing associations are fully replaced.
+    When 'campos' is omitted the associations are left unchanged.
     """
-    brand = BrandSerializer(read_only=True)
-    categories = CategorySerializer(many=True, read_only=True)
-    images = ImageSerializer(many=True, read_only=True)
+    campos = TipoProductoCampoWriteSerializer(many=True, required=False, write_only=True)
 
     class Meta:
-        model = BaseProduct
-        fields = [
-            'id',
-            'model_name',
-            'slug',
-            'long_description',
-            'brand',
-            'categories',
-            'specs',
-            'active',
-            'creation_date',
-            'update_date',
-            'images'
-        ]
-
-
-class BaseProductUpdateSerializer(serializers.ModelSerializer):
-    """
-    Serializer for updating BaseProduct.
-    Allows updating images by adding/removing/reordering them.
-    Accepts up to 10 new images via flat indexed fields (image_0..image_9).
-    """
-    # Image fields for file uploads (up to 10 new images)
-    image_0 = serializers.ImageField(write_only=True, required=False, allow_null=True)
-    image_1 = serializers.ImageField(write_only=True, required=False, allow_null=True)
-    image_2 = serializers.ImageField(write_only=True, required=False, allow_null=True)
-    image_3 = serializers.ImageField(write_only=True, required=False, allow_null=True)
-    image_4 = serializers.ImageField(write_only=True, required=False, allow_null=True)
-    image_5 = serializers.ImageField(write_only=True, required=False, allow_null=True)
-    image_6 = serializers.ImageField(write_only=True, required=False, allow_null=True)
-    image_7 = serializers.ImageField(write_only=True, required=False, allow_null=True)
-    image_8 = serializers.ImageField(write_only=True, required=False, allow_null=True)
-    image_9 = serializers.ImageField(write_only=True, required=False, allow_null=True)
-
-    # Alt text for each image
-    alt_text_0 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
-    alt_text_1 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
-    alt_text_2 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
-    alt_text_3 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
-    alt_text_4 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
-    alt_text_5 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
-    alt_text_6 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
-    alt_text_7 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
-    alt_text_8 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
-    alt_text_9 = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=255)
-
-    # Categories as list of IDs
-    categories = serializers.ListField(
-        child=serializers.IntegerField(),
-        write_only=True,
-        required=False,
-        help_text="List of category IDs"
-    )
-
-    # Option to remove existing images by ID
-    remove_images = serializers.ListField(
-        child=serializers.IntegerField(),
-        write_only=True,
-        required=False,
-        help_text="List of image IDs to remove"
-    )
-
-    # Reorder existing images: JSON string "[{\"id\": 5, \"order\": 0}, ...]"
-    reorder_data = serializers.CharField(write_only=True, required=False, allow_blank=True)
-
-    class Meta:
-        model = BaseProduct
-        fields = [
-            'model_name',
-            'long_description',
-            'brand',
-            'categories',
-            'specs',
-            'image_0', 'image_1', 'image_2', 'image_3', 'image_4',
-            'image_5', 'image_6', 'image_7', 'image_8', 'image_9',
-            'alt_text_0', 'alt_text_1', 'alt_text_2', 'alt_text_3', 'alt_text_4',
-            'alt_text_5', 'alt_text_6', 'alt_text_7', 'alt_text_8', 'alt_text_9',
-            'remove_images',
-            'reorder_data',
-        ]
+        model = TipoProducto
+        fields = ['nombre', 'descripcion', 'campos']
         extra_kwargs = {
-            'model_name': {'required': False},
-            'long_description': {'required': False},
-            'brand': {'required': False},
-            'specs': {'required': False},
+            'nombre': {'required': False},
+            'descripcion': {'required': False},
         }
 
-    def validate_categories(self, value):
-        """Validate that all category IDs exist and are active."""
-        if value:
-            existing_categories = Category.objects.filter(id__in=value, active=True)
-            if existing_categories.count() != len(value):
-                raise serializers.ValidationError("One or more category IDs are invalid or inactive.")
-        return value
-
-    def validate_brand(self, value):
-        """Validate that the brand is active."""
-        if value and not value.active:
-            raise serializers.ValidationError("The selected brand is inactive.")
-        return value
-
-    def validate_specs(self, value):
-        """Validate that specs is a valid JSON object (handles multipart string input)."""
-        if isinstance(value, str):
-            import json
-            try:
-                value = json.loads(value)
-            except json.JSONDecodeError:
-                raise serializers.ValidationError("Specs must be a valid JSON object.")
-        if value is not None and not isinstance(value, dict):
-            raise serializers.ValidationError("Specs must be a valid JSON object.")
-        return value
-
     def update(self, instance, validated_data):
-        """Update BaseProduct with new data and handle images."""
-        import json
+        """Update product type and replace field associations atomically."""
+        from django.db import transaction
 
-        # Extract image data
-        images_data = []
-        for i in range(10):
-            image_file = validated_data.pop(f'image_{i}', None)
-            alt_text = validated_data.pop(f'alt_text_{i}', '')
-            if image_file:
-                images_data.append({'imagen': image_file, 'alt_text': alt_text, 'slot': i})
+        campos_data = validated_data.pop('campos', None)
 
-        # Apply reorder to existing images
-        reorder_raw = validated_data.pop('reorder_data', '')
-        if reorder_raw:
-            try:
-                reorder_list = json.loads(reorder_raw)
-                for entry in reorder_list:
-                    Image.objects.filter(id=entry['id'], base_product=instance).update(order=entry['order'])
-            except (json.JSONDecodeError, KeyError):
-                pass
+        with transaction.atomic():
+            instance.nombre = validated_data.get('nombre', instance.nombre)
+            instance.descripcion = validated_data.get('descripcion', instance.descripcion)
+            instance.save()
 
-        # Handle image removal
-        remove_images = validated_data.pop('remove_images', [])
-        if remove_images:
-            Image.objects.filter(id__in=remove_images, base_product=instance).delete()
+            if campos_data is not None:
+                campo_ids = [f['id'] for f in campos_data]
+                if campo_ids:
+                    found_ids = set(
+                        CampoProducto.objects.filter(id__in=campo_ids).values_list('id', flat=True)
+                    )
+                    missing = set(campo_ids) - found_ids
+                    if missing:
+                        raise serializers.ValidationError({
+                            'campos': f'Product field(s) with id(s) {sorted(missing)} not found.'
+                        })
 
-        # Extract categories
-        category_ids = validated_data.pop('categories', None)
-
-        # Get user from context
-        user = self.context['request'].user
-
-        # Update basic fields
-        instance.model_name = validated_data.get('model_name', instance.model_name)
-        instance.long_description = validated_data.get('long_description', instance.long_description)
-        instance.brand = validated_data.get('brand', instance.brand)
-        instance.specs = validated_data.get('specs', instance.specs)
-        instance.user_last_modified = user
-        instance.save()
-
-        # Update categories if provided
-        if category_ids is not None:
-            instance.categories.set(category_ids)
-
-        # Add new images — order starts after existing kept images
-        existing_count = instance.images.count()
-        for idx, image_data in enumerate(images_data):
-            slot = image_data.pop('slot')
-            Image.objects.create(
-                base_product=instance,
-                order=existing_count + idx,
-                **image_data
-            )
+                instance.tipo_producto_campos.all().delete()
+                for field_data in campos_data:
+                    TipoProductoCampo.objects.create(
+                        tipo_producto=instance,
+                        campo_producto_id=field_data['id'],
+                        orden=field_data.get('orden', 0),
+                        required=field_data.get('required', False),
+                    )
 
         return instance
 
 
-# ProductVariant Serializers
+# CampoProducto Serializers
 
-class ProductVariantSerializer(serializers.ModelSerializer):
+class CampoProductoSerializer(serializers.ModelSerializer):
     """
-    Serializer for ProductVariant listing and retrieval.
-    Includes related base product information.
+    Serializer for CampoProducto model.
+    Used for listing and retrieving field information.
     """
-    base_product = BaseProductSerializer(read_only=True)
-    condition_display = serializers.CharField(source='get_condition_display', read_only=True)
-    stock_status_display = serializers.CharField(source='get_stock_status_display', read_only=True)
+    tipo_display = serializers.CharField(source='get_tipo_display', read_only=True)
 
     class Meta:
-        model = ProductVariant
+        model = CampoProducto
+        fields = ['id', 'nombre', 'tipo', 'tipo_display', 'required', 'active']
+
+
+class CampoProductoCreateSerializer(serializers.ModelSerializer):
+    """
+    Serializer for creating a new product field.
+    Includes the optional 'required' flag.
+    """
+    class Meta:
+        model = CampoProducto
+        fields = ['nombre', 'tipo', 'required']
+        extra_kwargs = {
+            'tipo': {'required': True},
+            'required': {'required': False},
+        }
+
+    def create(self, validated_data):
+        """Create and return a new product field instance."""
+        campo = CampoProducto.objects.create(**validated_data)
+        return campo
+
+
+class CampoProductoUpdateSerializer(serializers.ModelSerializer):
+    """
+    Serializer for updating product field information.
+    Allows modification of nombre, tipo, and required.
+    """
+    class Meta:
+        model = CampoProducto
+        fields = ['nombre', 'tipo', 'required']
+        extra_kwargs = {
+            'nombre': {'required': False},
+            'tipo': {'required': False},
+            'required': {'required': False},
+        }
+
+    def update(self, instance, validated_data):
+        """Update and return the field instance."""
+        instance.nombre = validated_data.get('nombre', instance.nombre)
+        instance.tipo = validated_data.get('tipo', instance.tipo)
+        instance.required = validated_data.get('required', instance.required)
+        instance.save()
+        return instance
+
+
+# TipoProductoCampo Serializers
+
+class TipoProductoCampoSerializer(serializers.ModelSerializer):
+    """
+    Serializer for TipoProductoCampo junction model.
+    Exposes the linked field's name, type, and ordering value.
+    The 'required' flag is read directly from the association row (Option B),
+    so the same CampoProducto can be required in one product type and optional
+    in another.
+    Used when reading field associations on a product type detail endpoint.
+    """
+    campo_nombre = serializers.CharField(source='campo_producto.nombre', read_only=True)
+    campo_tipo = serializers.CharField(source='campo_producto.tipo', read_only=True)
+    campo_tipo_display = serializers.CharField(source='campo_producto.get_tipo_display', read_only=True)
+
+    class Meta:
+        model = TipoProductoCampo
+        fields = ['id', 'campo_producto', 'campo_nombre', 'campo_tipo', 'campo_tipo_display', 'required', 'orden']
+
+
+class TipoProductoDetailSerializer(serializers.ModelSerializer):
+    """
+    Detail serializer for TipoProducto.
+    Includes the ordered list of associated CampoProducto entries
+    through the TipoProductoCampo junction table.
+    """
+    campos = TipoProductoCampoSerializer(source='tipo_producto_campos', many=True, read_only=True)
+
+    class Meta:
+        model = TipoProducto
+        fields = ['id', 'nombre', 'descripcion', 'active', 'campos']
+
+
+# Proveedor Serializers
+
+class ProveedorSerializer(serializers.ModelSerializer):
+    """
+    Serializer for Proveedor model.
+    Used for listing and retrieving supplier information.
+    """
+    class Meta:
+        model = Proveedor
+        fields = ['id', 'nombre', 'slug', 'active']
+        read_only_fields = ['slug']
+
+
+class ProveedorCreateSerializer(serializers.ModelSerializer):
+    """
+    Serializer for creating a new supplier.
+    Slug is auto-generated from nombre on model save.
+    """
+    class Meta:
+        model = Proveedor
+        fields = ['nombre']
+
+    def create(self, validated_data):
+        """Create and return a new Proveedor instance."""
+        proveedor = Proveedor.objects.create(**validated_data)
+        return proveedor
+
+
+class ProveedorUpdateSerializer(serializers.ModelSerializer):
+    """
+    Serializer for updating supplier information.
+    Only allows modification of nombre.
+    Slug is not regenerated on update (set once at creation).
+    """
+    class Meta:
+        model = Proveedor
+        fields = ['nombre']
+        extra_kwargs = {
+            'nombre': {'required': False},
+        }
+
+    def update(self, instance, validated_data):
+        """Update and return the Proveedor instance."""
+        instance.nombre = validated_data.get('nombre', instance.nombre)
+        instance.save()
+        return instance
+
+
+# ---------------------------------------------------------------------------
+# Producto serializers
+# ---------------------------------------------------------------------------
+
+class ImagenProductoSerializer(serializers.ModelSerializer):
+    """
+    Read serializer for ImagenProducto.
+    Returns the image URL (absolute) and display order.
+    """
+    url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ImagenProducto
+        fields = ['id', 'url', 'orden']
+
+    def get_url(self, obj):
+        """Return the absolute URL for the image."""
+        request = self.context.get('request')
+        if request:
+            return request.build_absolute_uri(obj.url.url)
+        return obj.url.url
+
+
+class ProductoCampoValorSerializer(serializers.ModelSerializer):
+    """
+    Read serializer for ProductoCampoValor.
+    Returns the campo id, its name, tipo, and the active value column.
+    The required constraint is now stored on TipoProductoCampo (Option B) and
+    is exposed via TipoProductoDetailSerializer, not here.
+    """
+    campo_nombre = serializers.CharField(source='campo_producto.nombre', read_only=True)
+    campo_tipo = serializers.CharField(source='campo_producto.tipo', read_only=True)
+
+    class Meta:
+        model = ProductoCampoValor
         fields = [
-            'id',
-            'base_product',
-            'price',
-            'condition',
-            'condition_display',
-            'stock_status',
-            'stock_status_display',
-            'is_published',
-            'active',
-            'creation_date',
-            'update_date'
+            'id', 'campo_producto', 'campo_nombre', 'campo_tipo',
+            'valor_texto', 'valor_numero', 'valor_booleano',
         ]
 
 
-class ProductVariantCreateSerializer(serializers.ModelSerializer):
+class ProductoSerializer(serializers.ModelSerializer):
     """
-    Serializer for creating a new ProductVariant.
+    Read serializer for Producto.
+    Used for list and detail views. Includes nested marca, tipo_producto,
+    categorias, campo_valores, and imagenes.
     """
+    marca_nombre = serializers.CharField(source='marca.name', read_only=True)
+    tipo_producto_nombre = serializers.CharField(source='tipo_producto.nombre', read_only=True)
+    categorias_data = serializers.SerializerMethodField()
+    campo_valores = ProductoCampoValorSerializer(many=True, read_only=True)
+    imagenes = ImagenProductoSerializer(many=True, read_only=True)
+
     class Meta:
-        model = ProductVariant
+        model = Producto
         fields = [
-            'base_product',
-            'price',
-            'condition',
-            'stock_status',
-            'is_published'
+            'id', 'nombre', 'descripcion', 'active',
+            'marca', 'marca_nombre',
+            'tipo_producto', 'tipo_producto_nombre',
+            'categorias_data', 'campo_valores', 'imagenes',
         ]
 
-    def validate_base_product(self, value):
-        """Validate that the base product exists and is active."""
-        if not value.active:
-            raise serializers.ValidationError("The selected base product is inactive.")
+    def get_categorias_data(self, obj):
+        """Return list of {id, name} dicts for associated categories."""
+        return [{'id': cat.id, 'name': cat.name} for cat in obj.categorias.all()]
+
+
+class ProductoCampoValorWriteSerializer(serializers.Serializer):
+    """
+    Nested write serializer for a single campo_valor entry inside create/update.
+    Accepts campo_producto id and the raw value; the view resolves which
+    value column to populate based on the campo's tipo.
+    """
+    campo_producto = serializers.IntegerField()
+    valor = serializers.CharField(allow_null=True, allow_blank=True, required=False)
+
+
+class ProductoCreateSerializer(serializers.Serializer):
+    """
+    Write serializer for creating a Producto.
+    Accepts base fields, category IDs, campo_valor entries, and image files
+    (passed through request.FILES as image_0, image_1, …, image_9).
+    """
+    nombre = serializers.CharField(max_length=255)
+    descripcion = serializers.CharField()
+    marca = serializers.PrimaryKeyRelatedField(queryset=Brand.objects.all())
+    tipo_producto = serializers.PrimaryKeyRelatedField(queryset=TipoProducto.objects.all())
+    categorias = serializers.ListField(
+        child=serializers.IntegerField(), allow_empty=False
+    )
+    campo_valores = serializers.ListField(
+        child=ProductoCampoValorWriteSerializer(), required=False, allow_empty=True
+    )
+
+    def validate_categorias(self, value):
+        """Ensure all provided category IDs exist."""
+        found = set(Category.objects.filter(id__in=value).values_list('id', flat=True))
+        missing = set(value) - found
+        if missing:
+            raise serializers.ValidationError(
+                f'Category ID(s) not found: {sorted(missing)}'
+            )
         return value
 
-    def validate_price(self, value):
-        """Validate that the price is positive."""
+    def _resolve_campo_valor(self, campo, raw_value, association_required=False):
+        """
+        Given a CampoProducto instance, a raw string value, and the required flag
+        from the TipoProductoCampo association (Option B), return a dict with only
+        the correct value column populated.
+        Raises ValidationError if the association marks the field as required and
+        the value is blank.
+        """
+        tipo = campo.tipo
+        valor_texto = None
+        valor_numero = None
+        valor_booleano = None
+
+        if raw_value is None or str(raw_value).strip() == '':
+            if association_required:
+                raise serializers.ValidationError(
+                    {f'campo_{campo.id}': f'El campo "{campo.nombre}" es obligatorio.'}
+                )
+            # Optional empty field — store None in all columns
+            return {'valor_texto': None, 'valor_numero': None, 'valor_booleano': None}
+
+        if tipo == CampoProducto.TipoCampoChoices.TEXTO:
+            valor_texto = str(raw_value)
+        elif tipo == CampoProducto.TipoCampoChoices.NUMERO:
+            try:
+                valor_numero = float(raw_value)
+            except (ValueError, TypeError):
+                raise serializers.ValidationError(
+                    {f'campo_{campo.id}': f'El campo "{campo.nombre}" debe ser un número.'}
+                )
+        elif tipo == CampoProducto.TipoCampoChoices.BOOLEANO:
+            if isinstance(raw_value, bool):
+                valor_booleano = raw_value
+            else:
+                valor_booleano = str(raw_value).lower() in ('true', '1', 'yes', 'on')
+
+        return {
+            'valor_texto': valor_texto,
+            'valor_numero': valor_numero,
+            'valor_booleano': valor_booleano,
+        }
+
+    @transaction.atomic
+    def create(self, validated_data):
+        """
+        Create Producto, ProductoCategoria entries, ProductoCampoValor entries,
+        and ImagenProducto entries atomically.
+        Images are read from self.context['request'].FILES.
+        The required constraint is read from TipoProductoCampo.required (Option B).
+        """
+        request = self.context['request']
+        campo_valores_data = validated_data.pop('campo_valores', [])
+        categorias_ids = validated_data.pop('categorias')
+        tipo_producto = validated_data['tipo_producto']
+
+        # Create the Producto
+        producto = Producto.objects.create(
+            nombre=validated_data['nombre'],
+            descripcion=validated_data['descripcion'],
+            marca=validated_data['marca'],
+            tipo_producto=tipo_producto,
+            usuario_ultima_modificacion=request.user,
+        )
+
+        # Create category associations
+        for cat_id in categorias_ids:
+            ProductoCategoria.objects.create(producto=producto, categoria_id=cat_id)
+
+        # Resolve campo IDs into CampoProducto instances
+        campo_ids = [entry['campo_producto'] for entry in campo_valores_data]
+        campos_map = {
+            c.id: c for c in CampoProducto.objects.filter(id__in=campo_ids)
+        }
+        missing_campos = set(campo_ids) - set(campos_map.keys())
+        if missing_campos:
+            raise serializers.ValidationError(
+                {'campo_valores': f'CampoProducto ID(s) not found: {sorted(missing_campos)}'}
+            )
+
+        # Build required map from TipoProductoCampo associations (Option B)
+        required_map = {
+            assoc.campo_producto_id: assoc.required
+            for assoc in TipoProductoCampo.objects.filter(
+                tipo_producto=tipo_producto,
+                campo_producto_id__in=campo_ids,
+            )
+        }
+
+        # Create ProductoCampoValor entries
+        for entry in campo_valores_data:
+            campo = campos_map[entry['campo_producto']]
+            association_required = required_map.get(campo.id, False)
+            resolved = self._resolve_campo_valor(campo, entry.get('valor'), association_required)
+            ProductoCampoValor.objects.create(
+                producto=producto,
+                campo_producto=campo,
+                **resolved,
+            )
+
+        # Process uploaded images (image_0 … image_9)
+        MAX_IMAGES = 10
+        for i in range(MAX_IMAGES):
+            img_file = request.FILES.get(f'image_{i}')
+            if img_file:
+                ImagenProducto.objects.create(
+                    producto=producto,
+                    url=img_file,
+                    orden=i,
+                )
+
+        return producto
+
+
+class ProductoUpdateSerializer(serializers.Serializer):
+    """
+    Write serializer for updating a Producto.
+    All fields are optional. When tipo_producto is changed, existing
+    campo_valores are deleted and rebuilt from scratch (caller must warn user).
+    Images are updated via remove_images (list of IDs) and new image_N files.
+    """
+    nombre = serializers.CharField(max_length=255, required=False)
+    descripcion = serializers.CharField(required=False)
+    marca = serializers.PrimaryKeyRelatedField(queryset=Brand.objects.all(), required=False)
+    tipo_producto = serializers.PrimaryKeyRelatedField(queryset=TipoProducto.objects.all(), required=False)
+    categorias = serializers.ListField(
+        child=serializers.IntegerField(), allow_empty=False, required=False
+    )
+    campo_valores = serializers.ListField(
+        child=ProductoCampoValorWriteSerializer(), required=False, allow_empty=True
+    )
+    remove_images = serializers.ListField(
+        child=serializers.IntegerField(), required=False, allow_empty=True
+    )
+    reorder_data = serializers.CharField(required=False, allow_blank=True)
+
+    def validate_categorias(self, value):
+        """Ensure all provided category IDs exist."""
+        found = set(Category.objects.filter(id__in=value).values_list('id', flat=True))
+        missing = set(value) - found
+        if missing:
+            raise serializers.ValidationError(
+                f'Category ID(s) not found: {sorted(missing)}'
+            )
+        return value
+
+    def _resolve_campo_valor(self, campo, raw_value, association_required=False):
+        """
+        Given a CampoProducto instance, a raw string value, and the required flag
+        from the TipoProductoCampo association (Option B), return a dict with only
+        the correct value column populated.
+        Raises ValidationError if the association marks the field as required and
+        the value is blank.
+        """
+        tipo = campo.tipo
+        valor_texto = None
+        valor_numero = None
+        valor_booleano = None
+
+        if raw_value is None or str(raw_value).strip() == '':
+            if association_required:
+                raise serializers.ValidationError(
+                    {f'campo_{campo.id}': f'El campo "{campo.nombre}" es obligatorio.'}
+                )
+            return {'valor_texto': None, 'valor_numero': None, 'valor_booleano': None}
+
+        if tipo == CampoProducto.TipoCampoChoices.TEXTO:
+            valor_texto = str(raw_value)
+        elif tipo == CampoProducto.TipoCampoChoices.NUMERO:
+            try:
+                valor_numero = float(raw_value)
+            except (ValueError, TypeError):
+                raise serializers.ValidationError(
+                    {f'campo_{campo.id}': f'El campo "{campo.nombre}" debe ser un número.'}
+                )
+        elif tipo == CampoProducto.TipoCampoChoices.BOOLEANO:
+            if isinstance(raw_value, bool):
+                valor_booleano = raw_value
+            else:
+                valor_booleano = str(raw_value).lower() in ('true', '1', 'yes', 'on')
+
+        return {
+            'valor_texto': valor_texto,
+            'valor_numero': valor_numero,
+            'valor_booleano': valor_booleano,
+        }
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        """
+        Update Producto fields, replace category associations if provided,
+        upsert or rebuild campo_valores, and process image changes.
+        """
+        import json
+        request = self.context['request']
+
+        # --- Base fields ---
+        if 'nombre' in validated_data:
+            instance.nombre = validated_data['nombre']
+        if 'descripcion' in validated_data:
+            instance.descripcion = validated_data['descripcion']
+        if 'marca' in validated_data:
+            instance.marca = validated_data['marca']
+
+        tipo_changed = (
+            'tipo_producto' in validated_data
+            and validated_data['tipo_producto'] != instance.tipo_producto
+        )
+        if 'tipo_producto' in validated_data:
+            instance.tipo_producto = validated_data['tipo_producto']
+
+        instance.usuario_ultima_modificacion = request.user
+        instance.save()
+
+        # --- Categories ---
+        if 'categorias' in validated_data:
+            instance.producto_categorias.all().delete()
+            for cat_id in validated_data['categorias']:
+                ProductoCategoria.objects.create(producto=instance, categoria_id=cat_id)
+
+        # --- Campo valores ---
+        if 'campo_valores' in validated_data:
+            if tipo_changed:
+                # New tipo_producto: wipe all existing values and create fresh
+                instance.campo_valores.all().delete()
+
+            campo_valores_data = validated_data['campo_valores']
+            campo_ids = [entry['campo_producto'] for entry in campo_valores_data]
+            campos_map = {
+                c.id: c for c in CampoProducto.objects.filter(id__in=campo_ids)
+            }
+            missing_campos = set(campo_ids) - set(campos_map.keys())
+            if missing_campos:
+                raise serializers.ValidationError(
+                    {'campo_valores': f'CampoProducto ID(s) not found: {sorted(missing_campos)}'}
+                )
+
+            # Build required map from TipoProductoCampo associations (Option B)
+            tipo_producto = instance.tipo_producto
+            required_map = {
+                assoc.campo_producto_id: assoc.required
+                for assoc in TipoProductoCampo.objects.filter(
+                    tipo_producto=tipo_producto,
+                    campo_producto_id__in=campo_ids,
+                )
+            }
+
+            for entry in campo_valores_data:
+                campo = campos_map[entry['campo_producto']]
+                association_required = required_map.get(campo.id, False)
+                resolved = self._resolve_campo_valor(campo, entry.get('valor'), association_required)
+                ProductoCampoValor.objects.update_or_create(
+                    producto=instance,
+                    campo_producto=campo,
+                    defaults=resolved,
+                )
+
+        # --- Images: removals ---
+        remove_ids = validated_data.get('remove_images', [])
+        if remove_ids:
+            ImagenProducto.objects.filter(producto=instance, id__in=remove_ids).delete()
+
+        # --- Images: reorder existing ---
+        reorder_raw = validated_data.get('reorder_data', '')
+        if reorder_raw:
+            try:
+                reorder_list = json.loads(reorder_raw)
+                for entry in reorder_list:
+                    ImagenProducto.objects.filter(
+                        producto=instance, id=entry['id']
+                    ).update(orden=entry['order'])
+            except (json.JSONDecodeError, KeyError):
+                pass  # Malformed reorder_data is silently ignored
+
+        # --- Images: new uploads ---
+        MAX_IMAGES = 10
+        current_count = instance.imagenes.count()
+        slot = 0
+        for i in range(MAX_IMAGES):
+            img_file = request.FILES.get(f'image_{i}')
+            if img_file and current_count + slot < MAX_IMAGES:
+                ImagenProducto.objects.create(
+                    producto=instance,
+                    url=img_file,
+                    orden=current_count + slot,
+                )
+                slot += 1
+
+        return instance
+
+
+# ---------------------------------------------------------------------------
+# Descuento serializers
+# ---------------------------------------------------------------------------
+
+class DescuentoSerializer(serializers.ModelSerializer):
+    """
+    Read serializer for Descuento.
+    Shows product name, condition, and discount price/dates.
+    """
+    producto_nombre = serializers.CharField(source='producto.nombre', read_only=True)
+    condicion_display = serializers.CharField(source='get_condicion_display', read_only=True)
+
+    class Meta:
+        model = Descuento
+        fields = ['id', 'producto', 'producto_nombre', 'condicion', 'condicion_display',
+                  'precio_descuento', 'fecha_inicio', 'fecha_fin', 'active']
+
+
+class DescuentoCreateSerializer(serializers.ModelSerializer):
+    """
+    Write serializer for creating a Descuento for a product + condition.
+    Applies to all sin_vender units matching (producto, condicion).
+    """
+    class Meta:
+        model = Descuento
+        fields = ['producto', 'condicion', 'precio_descuento', 'fecha_inicio', 'fecha_fin']
+
+    def validate(self, data):
+        """Ensure fecha_fin is not before fecha_inicio."""
+        if data.get('fecha_fin') and data.get('fecha_inicio'):
+            if data['fecha_fin'] < data['fecha_inicio']:
+                raise serializers.ValidationError(
+                    {'fecha_fin': 'La fecha de fin no puede ser anterior a la fecha de inicio.'}
+                )
+        return data
+
+    def create(self, validated_data):
+        """Create and return a new Descuento."""
+        descuento = Descuento.objects.create(**validated_data)
+        return descuento
+
+
+class DescuentoUpdateSerializer(serializers.ModelSerializer):
+    """
+    Write serializer for updating an existing Descuento.
+    All fields are optional (partial updates allowed).
+    """
+    class Meta:
+        model = Descuento
+        fields = ['precio_descuento', 'fecha_inicio', 'fecha_fin']
+        extra_kwargs = {
+            'precio_descuento': {'required': False},
+            'fecha_inicio': {'required': False},
+            'fecha_fin': {'required': False},
+        }
+
+    def validate(self, data):
+        """Ensure fecha_fin is not before fecha_inicio when both are provided."""
+        fecha_inicio = data.get('fecha_inicio', self.instance.fecha_inicio if self.instance else None)
+        fecha_fin = data.get('fecha_fin', self.instance.fecha_fin if self.instance else None)
+        if fecha_inicio and fecha_fin and fecha_fin < fecha_inicio:
+            raise serializers.ValidationError(
+                {'fecha_fin': 'La fecha de fin no puede ser anterior a la fecha de inicio.'}
+            )
+        return data
+
+    def update(self, instance, validated_data):
+        """Update and return the Descuento instance."""
+        instance.precio_descuento = validated_data.get('precio_descuento', instance.precio_descuento)
+        instance.fecha_inicio = validated_data.get('fecha_inicio', instance.fecha_inicio)
+        instance.fecha_fin = validated_data.get('fecha_fin', instance.fecha_fin)
+        instance.save()
+        return instance
+
+
+# ---------------------------------------------------------------------------
+# BajoPedido serializers
+# ---------------------------------------------------------------------------
+
+class BajoPedidoSerializer(serializers.ModelSerializer):
+    """
+    Read serializer for BajoPedido.
+    Used for list views. Includes producto name, marca, proveedor name, and descuento.
+    """
+    producto_nombre = serializers.CharField(source='producto.nombre', read_only=True)
+    producto_marca = serializers.CharField(source='producto.marca.name', read_only=True)
+    proveedor_nombre = serializers.SerializerMethodField()
+    condicion_display = serializers.CharField(source='get_condicion_display', read_only=True)
+    estado_display = serializers.CharField(source='get_estado_display', read_only=True)
+    descuento = serializers.SerializerMethodField()
+
+    class Meta:
+        model = BajoPedido
+        fields = [
+            'id', 'producto', 'producto_nombre', 'producto_marca',
+            'precio', 'condicion', 'condicion_display',
+            'estado', 'estado_display',
+            'proveedor', 'proveedor_nombre', 'enlace_proveedor',
+            'fecha_creacion', 'active', 'descuento',
+        ]
+
+    def get_proveedor_nombre(self, obj):
+        """Return supplier name or None if no supplier."""
+        return obj.proveedor.nombre if obj.proveedor else None
+
+    def get_descuento(self, obj):
+        """Return serialized Descuento if one exists for this (producto, condicion) pair, otherwise None."""
+        try:
+            descuento = Descuento.objects.get(producto=obj.producto, condicion=obj.condicion)
+            return DescuentoSerializer(descuento).data
+        except Descuento.DoesNotExist:
+            return None
+
+
+class BajoPedidoDetailSerializer(serializers.ModelSerializer):
+    """
+    Detail serializer for BajoPedido.
+    Includes all list fields plus nested descuento (if it exists).
+    """
+    producto_nombre = serializers.CharField(source='producto.nombre', read_only=True)
+    producto_marca = serializers.CharField(source='producto.marca.name', read_only=True)
+    proveedor_nombre = serializers.SerializerMethodField()
+    condicion_display = serializers.CharField(source='get_condicion_display', read_only=True)
+    estado_display = serializers.CharField(source='get_estado_display', read_only=True)
+    descuento = serializers.SerializerMethodField()
+
+    class Meta:
+        model = BajoPedido
+        fields = [
+            'id', 'producto', 'producto_nombre', 'producto_marca',
+            'precio', 'condicion', 'condicion_display',
+            'estado', 'estado_display',
+            'proveedor', 'proveedor_nombre', 'enlace_proveedor',
+            'fecha_creacion', 'active', 'descuento',
+        ]
+
+    def get_proveedor_nombre(self, obj):
+        """Return supplier name or None if no supplier."""
+        return obj.proveedor.nombre if obj.proveedor else None
+
+    def get_descuento(self, obj):
+        """Return serialized Descuento if one exists for this (producto, condicion) pair, otherwise None."""
+        try:
+            descuento = Descuento.objects.get(producto=obj.producto, condicion=obj.condicion)
+            return DescuentoSerializer(descuento).data
+        except Descuento.DoesNotExist:
+            return None
+
+
+class BajoPedidoCreateSerializer(serializers.ModelSerializer):
+    """
+    Write serializer for creating a BajoPedido.
+    Accepts producto_id to link the on-demand record to a product.
+    precio is required on creation.
+    An optional descuento nested object can be provided to create the discount atomically.
+    """
+    producto_id = serializers.PrimaryKeyRelatedField(
+        queryset=Producto.objects.all(),
+        source='producto',
+        write_only=True,
+    )
+    descuento = DescuentoCreateSerializer(required=False, write_only=True)
+
+    class Meta:
+        model = BajoPedido
+        fields = [
+            'producto_id', 'precio', 'condicion', 'estado',
+            'proveedor', 'enlace_proveedor', 'descuento',
+        ]
+        extra_kwargs = {
+            'proveedor': {'required': False, 'allow_null': True},
+            'enlace_proveedor': {'required': False, 'allow_null': True, 'allow_blank': True},
+        }
+
+    @transaction.atomic
+    def create(self, validated_data):
+        """
+        Create BajoPedido and optional Descuento atomically.
+        Sets usuario_ultima_modificacion from context['request'].
+        """
+        request = self.context['request']
+        descuento_data = validated_data.pop('descuento', None)
+
+        bajo_pedido = BajoPedido.objects.create(
+            usuario_ultima_modificacion=request.user,
+            **validated_data,
+        )
+
+        if descuento_data:
+            Descuento.objects.create(
+                producto=bajo_pedido.producto,
+                condicion=bajo_pedido.condicion,
+                **descuento_data
+            )
+
+        return bajo_pedido
+
+
+class BajoPedidoUpdateSerializer(serializers.ModelSerializer):
+    """
+    Write serializer for updating a BajoPedido.
+    All fields are optional. precio is editable here as a manual override.
+    An optional descuento nested object will create or replace the linked discount.
+    """
+    descuento = DescuentoCreateSerializer(required=False, write_only=True)
+
+    class Meta:
+        model = BajoPedido
+        fields = [
+            'precio', 'condicion', 'estado',
+            'proveedor', 'enlace_proveedor', 'descuento',
+        ]
+        extra_kwargs = {
+            'precio': {'required': False},
+            'condicion': {'required': False},
+            'estado': {'required': False},
+            'proveedor': {'required': False, 'allow_null': True},
+            'enlace_proveedor': {'required': False, 'allow_null': True, 'allow_blank': True},
+        }
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        """
+        Update BajoPedido fields and upsert Descuento if provided.
+        Sets usuario_ultima_modificacion from context['request'].
+        """
+        request = self.context['request']
+        descuento_data = validated_data.pop('descuento', None)
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.usuario_ultima_modificacion = request.user
+        instance.save()
+
+        if descuento_data is not None:
+            try:
+                descuento = Descuento.objects.get(
+                    producto=instance.producto,
+                    condicion=instance.condicion
+                )
+                # Update existing discount
+                descuento.precio_descuento = descuento_data.get('precio_descuento', descuento.precio_descuento)
+                descuento.fecha_inicio = descuento_data.get('fecha_inicio', descuento.fecha_inicio)
+                descuento.fecha_fin = descuento_data.get('fecha_fin', descuento.fecha_fin)
+                descuento.save()
+            except Descuento.DoesNotExist:
+                # Create new discount
+                Descuento.objects.create(
+                    producto=instance.producto,
+                    condicion=instance.condicion,
+                    **descuento_data
+                )
+
+        return instance
+
+
+# ---------------------------------------------------------------------------
+# UnidadProducto serializers
+# ---------------------------------------------------------------------------
+
+class UnidadProductoSerializer(serializers.ModelSerializer):
+    """
+    Read serializer for UnidadProducto.
+    Used for list and detail views. Includes display labels for choice fields
+    and product information for context.
+    """
+    producto_nombre = serializers.CharField(source='producto.nombre', read_only=True)
+    producto_marca = serializers.CharField(source='producto.marca.name', read_only=True)
+    condicion_display = serializers.CharField(source='get_condicion_display', read_only=True)
+    estado_venta_display = serializers.CharField(source='get_estado_venta_display', read_only=True)
+    estado_producto_display = serializers.CharField(source='get_estado_producto_display', read_only=True)
+
+    class Meta:
+        model = UnidadProducto
+        fields = [
+            'id', 'producto', 'producto_nombre', 'producto_marca',
+            'serial', 'condicion', 'condicion_display',
+            'estado_venta', 'estado_venta_display',
+            'estado_producto', 'estado_producto_display',
+            'precio', 'active',
+        ]
+
+
+class UnidadProductoCreateSerializer(serializers.ModelSerializer):
+    """
+    Write serializer for creating a new UnidadProducto.
+    Requires producto_id, condicion, serial, estado_venta, estado_producto, and precio.
+    Sets usuario_ultima_modificacion from context['request'].
+    Serial uniqueness is enforced at the model level; the serializer surfaces the error.
+    """
+    producto_id = serializers.PrimaryKeyRelatedField(
+        queryset=Producto.objects.all(),
+        source='producto',
+        write_only=True,
+    )
+
+    class Meta:
+        model = UnidadProducto
+        fields = ['producto_id', 'serial', 'condicion', 'estado_venta', 'estado_producto', 'precio']
+        extra_kwargs = {
+            'condicion': {'required': True},
+            'estado_venta': {'required': True},
+            'estado_producto': {'required': True},
+        }
+
+    def validate_precio(self, value):
+        """Ensure price is a positive number."""
         if value <= 0:
-            raise serializers.ValidationError("Price must be greater than zero.")
+            raise serializers.ValidationError('El precio debe ser mayor a 0.')
         return value
 
     def create(self, validated_data):
-        """Create ProductVariant with user tracking."""
-        # Get user from context
-        user = self.context['request'].user
-
-        # Create ProductVariant
-        product_variant = ProductVariant.objects.create(
+        """Create and return a new UnidadProducto instance."""
+        request = self.context['request']
+        unidad = UnidadProducto.objects.create(
+            usuario_ultima_modificacion=request.user,
             **validated_data,
-            user_last_modified=user
         )
+        return unidad
 
-        return product_variant
 
-
-class ProductVariantUpdateSerializer(serializers.ModelSerializer):
+class UnidadProductoUpdateSerializer(serializers.ModelSerializer):
     """
-    Serializer for updating ProductVariant.
-    All fields are optional for partial updates.
+    Write serializer for updating an existing UnidadProducto.
+    All fields are optional (partial updates allowed).
+    Serial, condicion, and precio are editable after creation.
+    Sets usuario_ultima_modificacion from context['request'].
     """
     class Meta:
-        model = ProductVariant
-        fields = [
-            'base_product',
-            'price',
-            'condition',
-            'stock_status',
-            'is_published'
-        ]
+        model = UnidadProducto
+        fields = ['serial', 'condicion', 'estado_venta', 'estado_producto', 'precio']
         extra_kwargs = {
-            'base_product': {'required': False},
-            'price': {'required': False},
-            'condition': {'required': False},
-            'stock_status': {'required': False},
-            'is_published': {'required': False}
+            'serial': {'required': False},
+            'condicion': {'required': False},
+            'estado_venta': {'required': False},
+            'estado_producto': {'required': False},
+            'precio': {'required': False},
         }
 
-    def validate_base_product(self, value):
-        """Validate that the base product exists and is active."""
-        if value and not value.active:
-            raise serializers.ValidationError("The selected base product is inactive.")
-        return value
-
-    def validate_price(self, value):
-        """Validate that the price is positive."""
-        if value is not None and value <= 0:
-            raise serializers.ValidationError("Price must be greater than zero.")
+    def validate_precio(self, value):
+        """Ensure price is a positive number when provided."""
+        if value <= 0:
+            raise serializers.ValidationError('El precio debe ser mayor a 0.')
         return value
 
     def update(self, instance, validated_data):
-        """Update ProductVariant with user tracking."""
-        # Get user from context
-        user = self.context['request'].user
-
-        # Update fields
-        instance.base_product = validated_data.get('base_product', instance.base_product)
-        instance.price = validated_data.get('price', instance.price)
-        instance.condition = validated_data.get('condition', instance.condition)
-        instance.stock_status = validated_data.get('stock_status', instance.stock_status)
-        instance.is_published = validated_data.get('is_published', instance.is_published)
-        instance.user_last_modified = user
+        """Update and return the UnidadProducto instance."""
+        request = self.context['request']
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.usuario_ultima_modificacion = request.user
         instance.save()
-
         return instance

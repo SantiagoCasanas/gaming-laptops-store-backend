@@ -56,12 +56,14 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     'django_filters',
     'rest_framework_simplejwt.token_blacklist',
+    'django_celery_beat',
 
     # Local apps
     'core',
     'products',
     'users',
     'sales',
+    'purchases',
 ]
 
 MIDDLEWARE = [
@@ -222,3 +224,33 @@ CELERY_BROKER_URL = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
 CELERY_RESULT_BACKEND = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
+
+# Celery Beat Scheduler
+CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
+
+from celery.schedules import crontab
+
+CELERY_BEAT_SCHEDULE = {
+    'actualizar-precios-bajo-pedido-cada-30-min': {
+        'task': 'products.tasks.actualizar_precios_bajo_pedido',
+        'schedule': crontab(minute='*/30'),
+    },
+}
+
+# Redis Cache
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+        'LOCATION': os.getenv('REDIS_URL', 'redis://localhost:6379/0'),
+    }
+}
+
+# eBay API Configuration
+EBAY_CLIENT_ID = os.getenv('EBAY_CLIENT_ID', '')
+EBAY_CLIENT_SECRET = os.getenv('EBAY_CLIENT_SECRET', '')
+EBAY_MARKETPLACE_ID = os.getenv('EBAY_MARKETPLACE_ID', 'EBAY_US')
+EBAY_TOKEN_CACHE_KEY = 'ebay_access_token'
+EBAY_TOKEN_CACHE_TIMEOUT = 7000
+EBAY_MARKUP_FACTOR = float(os.getenv('EBAY_MARKUP_FACTOR', '1.2'))
+EBAY_FIXED_COST_USD = float(os.getenv('EBAY_FIXED_COST_USD', '50'))
+EBAY_PRECIO_REDONDEO_COP = int(os.getenv('EBAY_PRECIO_REDONDEO_COP', '90000'))

@@ -4,23 +4,35 @@ from django.conf import settings
 from django.utils.text import slugify
 from core.models import BaseModel
 
+
+# ---------------------------------------------------------------------------
+# Legacy upload helper — kept so existing migrations (0001_initial) can load.
+# Not used by any current model.
+# ---------------------------------------------------------------------------
+
 def get_image_upload_path(instance, filename):
-    """Generates a unique path for every image."""
+    """Legacy upload path helper referenced by early migrations."""
     ext = filename.split('.')[-1]
     filename = f"{uuid.uuid4()}.{ext}"
     return f'products/images/{filename}'
 
 
+# ---------------------------------------------------------------------------
+# Kept models (Brand, Category) — no structural changes
+# ---------------------------------------------------------------------------
+
 class Brand(BaseModel):
-    """Model that represents a brand, ej: ASUS, MSI, NVIDIA."""
+    """Model that represents a brand, e.g.: ASUS, MSI, NVIDIA."""
     name = models.CharField(max_length=100, null=False, unique=True, help_text="Brand's name")
     slug = models.SlugField(max_length=120, unique=True, blank=True, help_text="URL slug, auto-generated")
+    created_at = models.DateTimeField(auto_now_add=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True, null=True)
 
     class Meta:
         verbose_name = "Brand"
         verbose_name_plural = "Brands"
         ordering = ['name']
-    
+
     def save(self, *args, **kwargs):
         if not self.slug:
             self.slug = slugify(self.name)
@@ -31,10 +43,12 @@ class Brand(BaseModel):
 
 
 class Category(BaseModel):
-    """Model that represents the product's category, ej: Portátiles, Tarjetas Gráficas."""
-    name = models.CharField(max_length=100, unique=True, null=False, help_text="Categorys name")
+    """Model that represents the product's category, e.g.: Portátiles, Tarjetas Gráficas."""
+    name = models.CharField(max_length=100, unique=True, null=False, help_text="Category's name")
     slug = models.SlugField(max_length=120, unique=True, blank=True, help_text="URL slug, auto-generated")
     description = models.TextField(blank=True, null=True, help_text="Optional description of the category")
+    created_at = models.DateTimeField(auto_now_add=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True, null=True)
 
     class Meta:
         verbose_name = "Category"
@@ -50,100 +64,433 @@ class Category(BaseModel):
         return self.name
 
 
-class BaseProduct(BaseModel):
-    """Base model that contains the product's base info."""
-    model_name = models.CharField(max_length=255, null=False, help_text="Full name of the product model")
-    slug = models.SlugField(max_length=280, unique=True, blank=True, null=False, help_text="Slug for the URL, it is automatically generated")
-    long_description = models.TextField(null=False, help_text="Detailed description and specifications of the product")
-    brand = models.ForeignKey(Brand, on_delete=models.PROTECT, related_name="base_products", null=False, help_text="Brand to which the product belongs")
-    categories = models.ManyToManyField(Category, related_name="base_products", help_text="Categories to which the product belongs")
-    specs = models.JSONField(default=dict, null=False, help_text="Product specifications in JSON format")
-    user_last_modified = models.ForeignKey(
+# ---------------------------------------------------------------------------
+# New domain models — Patecnologicos-bd schema
+# ---------------------------------------------------------------------------
+
+class TipoProducto(BaseModel):
+    """
+    Defines a product type (e.g. Laptop, GPU, Peripheral).
+    Acts as a template that declares which dynamic fields apply to products of that type.
+    """
+    nombre = models.CharField(max_length=100, unique=True, null=False, help_text="Product type name")
+    descripcion = models.TextField(blank=True, null=True, help_text="Optional description of the product type")
+
+    class Meta:
+        verbose_name = "Product Type"
+        verbose_name_plural = "Product Types"
+        ordering = ['nombre']
+
+    def __str__(self):
+        return self.nombre
+
+
+class CampoProducto(BaseModel):
+    """
+    Defines a dynamic field that can be attached to one or more product types.
+    Supports three data types: text, number, and boolean.
+    """
+    class TipoCampoChoices(models.TextChoices):
+        TEXTO = 'texto', 'Text'
+        NUMERO = 'numero', 'Number'
+        BOOLEANO = 'booleano', 'Boolean'
+
+    nombre = models.CharField(max_length=100, unique=True, null=False, help_text="Field name (e.g. RAM, GPU Model)")
+    tipo = models.CharField(
+        max_length=20,
+        choices=TipoCampoChoices.choices,
+        default=TipoCampoChoices.TEXTO,
+        null=False,
+        help_text="Data type of this field"
+    )
+    required = models.BooleanField(
+        default=False,
+        help_text="Whether this field must be filled in when creating or editing a product"
+    )
+
+    class Meta:
+        verbose_name = "Product Field"
+        verbose_name_plural = "Product Fields"
+        ordering = ['nombre']
+
+    def __str__(self):
+        return f"{self.nombre} ({self.get_tipo_display()})"
+
+
+class TipoProductoCampo(models.Model):
+    """
+    Junction table that associates CampoProducto instances to a TipoProducto.
+    Includes an ordering field to control display order of fields per product type,
+    and a required flag that controls whether the field is mandatory when creating
+    or editing a product of this type (Option B: required is per-association,
+    not per-field globally).
+    """
+    tipo_producto = models.ForeignKey(
+        TipoProducto,
+        on_delete=models.CASCADE,
+        related_name='tipo_producto_campos',
+        help_text="Product type this field belongs to"
+    )
+    campo_producto = models.ForeignKey(
+        CampoProducto,
+        on_delete=models.CASCADE,
+        related_name='tipo_producto_campos',
+        help_text="Dynamic field linked to this product type"
+    )
+    orden = models.PositiveIntegerField(default=0, help_text="Display order of this field within the product type")
+    required = models.BooleanField(
+        default=False,
+        help_text="Whether this field is required when creating or editing a product of this type"
+    )
+
+    class Meta:
+        verbose_name = "Product Type Field"
+        verbose_name_plural = "Product Type Fields"
+        ordering = ['orden']
+        unique_together = [('tipo_producto', 'campo_producto')]
+
+    def __str__(self):
+        req = " [required]" if self.required else ""
+        return f"{self.tipo_producto.nombre} -> {self.campo_producto.nombre} (orden {self.orden}){req}"
+
+
+class Producto(BaseModel):
+    """
+    Core product entity. Represents a single product model (not a purchasable listing).
+    Linked to a brand, a product type, and one or more categories.
+    """
+    nombre = models.CharField(max_length=255, null=False, help_text="Full product name / model")
+    descripcion = models.TextField(null=False, help_text="Detailed product description (supports long text with formatting)")
+    marca = models.ForeignKey(
+        Brand,
+        on_delete=models.PROTECT,
+        related_name='productos',
+        null=False,
+        help_text="Brand of this product"
+    )
+    tipo_producto = models.ForeignKey(
+        TipoProducto,
+        on_delete=models.PROTECT,
+        related_name='productos',
+        null=False,
+        help_text="Product type that defines which dynamic fields apply"
+    )
+    categorias = models.ManyToManyField(
+        Category,
+        through='ProductoCategoria',
+        related_name='productos',
+        help_text="Categories this product belongs to"
+    )
+    usuario_ultima_modificacion = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
         null=True,
         help_text="Last user who modified this product"
     )
-    creation_date = models.DateTimeField(auto_now_add=True)
-    update_date = models.DateTimeField(auto_now=True)
- 
 
     class Meta:
-        verbose_name = "Base Product"
-        verbose_name_plural = "Base Products"
-        ordering = ['-user_last_modified']
+        verbose_name = "Product"
+        verbose_name_plural = "Products"
+        ordering = ['-id']
+
+    def __str__(self):
+        return f"{self.marca.name} - {self.nombre}"
+
+
+class ProductoCategoria(models.Model):
+    """
+    Explicit junction table for the Producto <-> Category M2M relationship.
+    """
+    producto = models.ForeignKey(
+        Producto,
+        on_delete=models.CASCADE,
+        related_name='producto_categorias',
+        help_text="Product"
+    )
+    categoria = models.ForeignKey(
+        Category,
+        on_delete=models.CASCADE,
+        related_name='producto_categorias',
+        help_text="Category"
+    )
+
+    class Meta:
+        verbose_name = "Product Category"
+        verbose_name_plural = "Product Categories"
+        unique_together = [('producto', 'categoria')]
+
+    def __str__(self):
+        return f"{self.producto.nombre} -> {self.categoria.name}"
+
+
+class ProductoCampoValor(models.Model):
+    """
+    Stores the actual value of a dynamic CampoProducto for a specific Producto.
+    Only one of the three value columns is expected to be non-null per row,
+    depending on CampoProducto.tipo.
+    """
+    producto = models.ForeignKey(
+        Producto,
+        on_delete=models.CASCADE,
+        related_name='campo_valores',
+        help_text="Product this value belongs to"
+    )
+    campo_producto = models.ForeignKey(
+        CampoProducto,
+        on_delete=models.PROTECT,
+        related_name='campo_valores',
+        help_text="Dynamic field definition"
+    )
+    valor_texto = models.TextField(blank=True, null=True, help_text="Value when campo_producto.tipo = 'texto'")
+    valor_numero = models.DecimalField(
+        max_digits=20, decimal_places=6,
+        blank=True, null=True,
+        help_text="Value when campo_producto.tipo = 'numero'"
+    )
+    valor_booleano = models.BooleanField(blank=True, null=True, help_text="Value when campo_producto.tipo = 'booleano'")
+
+    class Meta:
+        verbose_name = "Product Field Value"
+        verbose_name_plural = "Product Field Values"
+        unique_together = [('producto', 'campo_producto')]
+
+    def __str__(self):
+        return f"{self.producto.nombre} - {self.campo_producto.nombre}"
+
+
+class ImagenProducto(BaseModel):
+    """
+    Image associated with a Producto. Stores a URL/path and a display order.
+    """
+    producto = models.ForeignKey(
+        Producto,
+        on_delete=models.CASCADE,
+        related_name='imagenes',
+        help_text="Product this image belongs to"
+    )
+    url = models.ImageField(
+        upload_to='products/images/',
+        null=False,
+        help_text="Product image file"
+    )
+    orden = models.PositiveSmallIntegerField(default=0, help_text="Display order of this image")
+
+    class Meta:
+        verbose_name = "Product Image"
+        verbose_name_plural = "Product Images"
+        ordering = ['orden']
+
+    def __str__(self):
+        return f"Image #{self.orden} - {self.producto.nombre}"
+
+
+class Proveedor(BaseModel):
+    """
+    Supplier / vendor entity. Referenced by BajoPedido to track the source.
+    """
+    nombre = models.CharField(max_length=100, unique=True, null=False, help_text="Supplier name")
+    slug = models.SlugField(max_length=120, unique=True, blank=True, help_text="URL slug, auto-generated")
+
+    class Meta:
+        verbose_name = "Supplier"
+        verbose_name_plural = "Suppliers"
+        ordering = ['nombre']
 
     def save(self, *args, **kwargs):
         if not self.slug:
-            self.slug = slugify(f"{self.brand.name}-{self.model_name}")
+            self.slug = slugify(self.nombre)
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.brand.name} - {self.model_name}"
+        return self.nombre
 
 
-class ProductVariant(BaseModel):
-    """Represents a specific variant of a BaseProduct, differentiated by condition, stock status, price, etc."""
-    class ConditionChoices(models.TextChoices):
-        NEW = 'nuevo', 'Nuevo'
+class BajoPedido(BaseModel):
+    """
+    Represents a product available on-demand (e.g., via eBay).
+    Not a real unit - updated daily by Celery based on supplier availability.
+    """
+    class CondicionChoices(models.TextChoices):
+        NUEVO = 'nuevo', 'New'
         OPEN_BOX = 'open_box', 'Open Box'
         REFURBISHED = 'refurbished', 'Refurbished'
-        USED = 'usado', 'Usado'
+        USADO = 'usado', 'Used'
 
-    class StatusStockChoices(models.TextChoices):
-        IN_STOCK = 'en_stock', 'En Stock'
-        ON_THE_WAY = 'en_camino', 'En Camino'
-        WITH_IMPORTATION = 'por_importacion', 'Por Importación'
-        WITHOUT_STOCK = 'sin_stock', 'Sin Stock'
+    class EstadoChoices(models.TextChoices):
+        ACTIVO = 'activo', 'Active'
+        SIN_EXISTENCIAS = 'sin_existencias', 'Out of Stock'
+        INACTIVO = 'inactivo', 'Inactive'
 
-    base_product = models.ForeignKey(BaseProduct, on_delete=models.PROTECT, related_name="product_variants", help_text="Base product to which this variant belongs")
-    price = models.IntegerField(null=False, help_text="Selling price of the variant")
-    condition = models.CharField(null=False, max_length=20, choices=ConditionChoices.choices, default=ConditionChoices.NEW, help_text="Condition of the product")
-    stock_status = models.CharField(null=False, max_length=20, choices=StatusStockChoices.choices, default=StatusStockChoices.IN_STOCK, help_text="Product stock status")
-    is_published = models.BooleanField(default=True, null=False, help_text="Indicates whether the variant is visible in the store")
-    user_last_modified = models.ForeignKey(
+    producto = models.ForeignKey(
+        Producto,
+        on_delete=models.PROTECT,
+        related_name='bajo_pedidos',
+        help_text="Product available on-demand"
+    )
+    condicion = models.CharField(
+        max_length=20,
+        choices=CondicionChoices.choices,
+        help_text="Physical condition for on-demand sourcing"
+    )
+    precio = models.DecimalField(
+        max_digits=14, decimal_places=2,
+        help_text="Price updated daily by Celery via eBay formula"
+    )
+    enlace_proveedor = models.URLField(
+        max_length=2048,
+        blank=True,
+        null=True,
+        help_text="eBay item URL (optional)"
+    )
+    estado = models.CharField(
+        max_length=20,
+        choices=EstadoChoices.choices,
+        default=EstadoChoices.ACTIVO,
+        help_text="Availability status for on-demand sourcing"
+    )
+    proveedor = models.ForeignKey(
+        Proveedor,
+        on_delete=models.SET_NULL,
+        related_name='bajo_pedidos',
+        null=True,
+        blank=True,
+        help_text="Supplier (optional)"
+    )
+    usuario_ultima_modificacion = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
         null=True,
-        help_text="Last user who modified this variant"
+        related_name='bajo_pedidos_modificados',
+        help_text="Last user who modified this record"
     )
-    creation_date = models.DateTimeField(auto_now_add=True)
-    update_date = models.DateTimeField(auto_now=True)
 
     class Meta:
-        verbose_name = "Product Variant"
-        verbose_name_plural = "Product Variants"
-        ordering = ['price', 'condition']
+        verbose_name = "On-Demand Product"
+        verbose_name_plural = "On-Demand Products"
+        unique_together = [('producto', 'condicion')]
+        ordering = ['producto', 'condicion']
 
     def __str__(self):
-        return f"{self.base_product.model_name} ({self.get_condition_display()}) - {self.pk}"
+        return f"{self.producto.nombre} ({self.condicion}) - ${self.precio} ({self.get_estado_display()})"
 
 
-class Image(BaseModel):
-    """Model to save the images that belongs to the product."""
-    base_product = models.ForeignKey(BaseProduct, on_delete=models.ProtectedError, related_name="images", help_text="Variant to which the image belongs")
-    imagen = models.ImageField(upload_to=get_image_upload_path, help_text="Product' image")
-    alt_text = models.CharField(max_length=255, blank=True, null=True, help_text="Texto alternativo para la imagen (SEO)")
-    order = models.PositiveSmallIntegerField(default=0, help_text="Display order of the image")
+class UnidadProducto(BaseModel):
+    """
+    Represents a single physical unit of a Producto.
+    Tracks serial number, sale state, physical state, condition, and individual price.
+    """
+    class CondicionChoices(models.TextChoices):
+        NUEVO = 'nuevo', 'New'
+        OPEN_BOX = 'open_box', 'Open Box'
+        REFURBISHED = 'refurbished', 'Refurbished'
+        USADO = 'usado', 'Used'
+
+    class EstadoVentaChoices(models.TextChoices):
+        SIN_VENDER = 'sin_vender', 'Not Sold'
+        SEPARADO = 'separado', 'On Hold'
+        VENDIDO = 'vendido', 'Sold'
+        POR_ENCARGO = 'por_encargo', 'On Order'
+        ENTREGADO_GARANTIA = 'entregado_garantia', 'Warranty Delivery'
+        DANADO = 'danado', 'Damaged'
+        SOLICITUD_METODO_ALIADO = 'solicitud_metodo_aliado', 'Pending Trade-in'
+
+    class EstadoProductoChoices(models.TextChoices):
+        EN_STOCK = 'en_stock', 'In Stock'
+        VIAJANDO = 'viajando', 'In Transit'
+        POR_COMPRAR = 'por_comprar', 'Pending Purchase'
+        POR_ENTREGAR = 'por_entregar', 'Pending Delivery'
+        ENTREGADO = 'entregado', 'Delivered'
+        POR_REPARAR = 'por_reparar', 'Pending Repair'
+        EN_REPARACION = 'en_reparacion', 'In Repair'
+
+    producto = models.ForeignKey(
+        Producto,
+        on_delete=models.PROTECT,
+        related_name='unidades',
+        null=False,
+        help_text="Product this unit belongs to"
+    )
+    serial = models.CharField(max_length=100, unique=True, null=False, help_text="Unique serial number of this unit")
+    condicion = models.CharField(
+        max_length=20,
+        choices=CondicionChoices.choices,
+        null=False,
+        help_text="Physical condition of this unit"
+    )
+    estado_venta = models.CharField(
+        max_length=30,
+        choices=EstadoVentaChoices.choices,
+        default=EstadoVentaChoices.SIN_VENDER,
+        null=False,
+        help_text="Commercial status of this unit"
+    )
+    estado_producto = models.CharField(
+        max_length=20,
+        choices=EstadoProductoChoices.choices,
+        default=EstadoProductoChoices.EN_STOCK,
+        null=False,
+        help_text="Physical / logistic state of this unit"
+    )
+    precio = models.DecimalField(
+        max_digits=14, decimal_places=2,
+        null=False,
+        help_text="Individual sale price for this unit (COP)"
+    )
+    usuario_ultima_modificacion = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        related_name='unidades_modificadas',
+        help_text="Last user who modified this unit"
+    )
 
     class Meta:
-        verbose_name = "Imagen"
-        verbose_name_plural = "Images"
+        verbose_name = "Product Unit"
+        verbose_name_plural = "Product Units"
+        ordering = ['serial']
 
     def __str__(self):
-        return f"Image for {self.product_variant.pk}"
-    
+        return f"Unit {self.serial} - {self.producto.nombre} ({self.condicion})"
 
-class Discount(models.Model):
-    """Model for applying a discount to a ProductVariant."""
-    product_variant = models.OneToOneField(ProductVariant, on_delete=models.PROTECT, related_name="discount", help_text="Variant that has this discount")
-    discount_price = models.IntegerField(null=False, help_text="Final price with discount applied")
-    active = models.BooleanField(default=True, help_text="Indicates whether the discount is active")
+
+class Descuento(BaseModel):
+    """
+    Discount applied to a product with specific condition.
+    Applies to all sin_vender units matching (producto, condicion).
+    """
+    class CondicionChoices(models.TextChoices):
+        NUEVO = 'nuevo', 'New'
+        OPEN_BOX = 'open_box', 'Open Box'
+        REFURBISHED = 'refurbished', 'Refurbished'
+        USADO = 'usado', 'Used'
+
+    producto = models.ForeignKey(
+        Producto,
+        on_delete=models.PROTECT,
+        related_name='descuentos',
+        help_text="Product that receives this discount"
+    )
+    condicion = models.CharField(
+        max_length=20,
+        choices=CondicionChoices.choices,
+        help_text="Condition of units this discount applies to"
+    )
+    precio_descuento = models.DecimalField(
+        max_digits=14, decimal_places=2,
+        null=False,
+        help_text="Discounted sale price (COP)"
+    )
+    fecha_inicio = models.DateField(null=False, help_text="Date from which the discount is valid")
+    fecha_fin = models.DateField(null=False, help_text="Date until which the discount is valid")
 
     class Meta:
         verbose_name = "Discount"
         verbose_name_plural = "Discounts"
+        unique_together = [('producto', 'condicion')]
 
     def __str__(self):
-        status = "Active" if self.active else "Inactive"
-        return f"Discount for {self.product_variant} - ${self.discount_price} ({status})"
+        estado = "Active" if self.active else "Inactive"
+        return f"{self.producto.nombre} ({self.condicion}) - ${self.precio_descuento} ({estado})"
+
+
+#  removed - will be recreated for BajoPedido tracking only in Milestone 5

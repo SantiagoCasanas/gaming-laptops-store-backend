@@ -1,4 +1,361 @@
 from django.db import models
+from django.conf import settings
+from core.models import BaseModel
+from products.models import UnidadProducto
+
+
+class Departamento(BaseModel):
+    """Colombian department/region."""
+    nombre = models.CharField(max_length=100, unique=True, null=False, help_text="Department name")
+    codigo = models.CharField(max_length=5, blank=True, null=True, help_text="Optional department code")
+
+    class Meta:
+        verbose_name = "Department"
+        verbose_name_plural = "Departments"
+        ordering = ['nombre']
+
+    def __str__(self):
+        return self.nombre
+
+
+class Ciudad(BaseModel):
+    """Colombian city."""
+    nombre = models.CharField(max_length=100, null=False, help_text="City name")
+    departamento = models.ForeignKey(
+        Departamento,
+        on_delete=models.PROTECT,
+        related_name='ciudades',
+        null=False,
+        help_text="Department this city belongs to"
+    )
+
+    class Meta:
+        verbose_name = "City"
+        verbose_name_plural = "Cities"
+        ordering = ['nombre']
+        unique_together = [('nombre', 'departamento')]
+
+    def __str__(self):
+        return f"{self.nombre} ({self.departamento.nombre})"
+
+
+class Cliente(BaseModel):
+    """Customer record (not a system user)."""
+    nombre_completo = models.CharField(max_length=200, null=False, help_text="Full name of the customer")
+    cedula = models.CharField(max_length=50, unique=True, null=False, help_text="Unique identification document")
+    celular = models.CharField(max_length=30, null=False, help_text="Phone number")
+    correo = models.EmailField(unique=True, null=False, help_text="Email address")
+    direccion = models.CharField(max_length=300, null=False, help_text="Physical address")
+    ciudad = models.ForeignKey(
+        Ciudad,
+        on_delete=models.PROTECT,
+        related_name='clientes',
+        null=False,
+        help_text="City where the customer is located"
+    )
+    departamento = models.ForeignKey(
+        Departamento,
+        on_delete=models.PROTECT,
+        related_name='clientes',
+        null=False,
+        help_text="Department where the customer is located"
+    )
+
+    class Meta:
+        verbose_name = "Customer"
+        verbose_name_plural = "Customers"
+        ordering = ['nombre_completo']
+
+    def __str__(self):
+        return f"{self.nombre_completo} ({self.cedula})"
+
+
+class SolicitudBajoPedido(BaseModel):
+    """
+    Represents a customer's individual request to purchase a product that is not currently in stock.
+    Customer requests a specific product with condition, pays a deposit, and an OrdenCompra is created to source it.
+    """
+    class CondicionChoices(models.TextChoices):
+        NUEVO = 'nuevo', 'New'
+        OPEN_BOX = 'open_box', 'Open Box'
+        REFURBISHED = 'refurbished', 'Refurbished'
+        USADO = 'usado', 'Used'
+
+    class EstadoChoices(models.TextChoices):
+        POR_COMPRAR = 'por_comprar', 'Pending Purchase'
+        ACTIVA = 'activa', 'Active'
+        COMPLETADA = 'completada', 'Completed'
+        EXPIRADA = 'expirada', 'Expired'
+        CANCELADA = 'cancelada', 'Cancelled'
+
+    producto = models.ForeignKey(
+        'products.Producto',
+        on_delete=models.PROTECT,
+        related_name='solicitudes_bajo_pedido',
+        null=False,
+        help_text="Product the customer is requesting"
+    )
+    condicion = models.CharField(
+        max_length=20,
+        choices=CondicionChoices.choices,
+        help_text="Desired condition of the product"
+    )
+    cliente = models.ForeignKey(
+        Cliente,
+        on_delete=models.PROTECT,
+        related_name='solicitudes_bajo_pedido',
+        null=False,
+        help_text="Customer requesting this product"
+    )
+    valor_abono = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        null=False,
+        help_text="Initial payment/deposit from customer"
+    )
+    fecha_solicitud = models.DateField(
+        auto_now_add=True,
+        help_text="Date when customer requested the product"
+    )
+    fecha_maxima_compra = models.DateField(
+        null=False,
+        help_text="Deadline for the purchase to be completed"
+    )
+    orden_compra = models.OneToOneField(
+        'purchases.OrdenCompra',
+        on_delete=models.SET_NULL,
+        related_name='solicitud_bajo_pedido',
+        null=True,
+        blank=True,
+        help_text="Associated purchase order (set when order is created)"
+    )
+    estado = models.CharField(
+        max_length=20,
+        choices=EstadoChoices.choices,
+        default=EstadoChoices.POR_COMPRAR,
+        null=False,
+        help_text="Current status of the request"
+    )
+    usuario_ultima_modificacion = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        related_name='solicitudes_bajo_pedido_modificadas',
+        help_text="Last user who modified this record"
+    )
+
+    class Meta:
+        verbose_name = "Customer Back Order Request"
+        verbose_name_plural = "Customer Back Order Requests"
+        ordering = ['-fecha_solicitud']
+        unique_together = [('producto', 'condicion', 'cliente')]
+
+    def __str__(self):
+        return f"Back order request: {self.cliente.nombre_completo} - {self.producto.nombre} ({self.condicion})"
+
+
+class Separacion(BaseModel):
+    """
+    Represents a hold/reservation on a specific unit that already exists in stock or in transit.
+    Customer reserves a unit and pays a deposit.
+    """
+    class EstadoChoices(models.TextChoices):
+        ACTIVA = 'activa', 'Active'
+        EXPIRADA = 'expirada', 'Expired'
+        CANCELADA = 'cancelada', 'Cancelled'
+        COMPLETADA = 'completada', 'Completed'
+
+    unidad_producto = models.ForeignKey(
+        UnidadProducto,
+        on_delete=models.PROTECT,
+        related_name='separaciones',
+        null=False,
+        help_text="Specific unit being held"
+    )
+    cliente = models.ForeignKey(
+        Cliente,
+        on_delete=models.PROTECT,
+        related_name='separaciones',
+        null=False,
+        help_text="Customer holding this unit"
+    )
+    valor_abono = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        null=False,
+        help_text="Deposit paid for the hold"
+    )
+    fecha_separacion = models.DateField(
+        auto_now_add=True,
+        help_text="Date when the hold was created"
+    )
+    fecha_maxima_compra = models.DateField(
+        null=False,
+        help_text="Deadline for customer to complete purchase"
+    )
+    estado = models.CharField(
+        max_length=20,
+        choices=EstadoChoices.choices,
+        default=EstadoChoices.ACTIVA,
+        null=False,
+        help_text="Current status of the hold"
+    )
+    usuario_ultima_modificacion = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        related_name='separaciones_modificadas',
+        help_text="Last user who modified this record"
+    )
+
+    class Meta:
+        verbose_name = "Hold/Separation"
+        verbose_name_plural = "Holds/Separations"
+        ordering = ['-fecha_separacion']
+        unique_together = [('unidad_producto', 'cliente')]
+
+    def __str__(self):
+        return f"Hold: {self.cliente.nombre_completo} - Unit {self.unidad_producto.serial}"
+
+
+class Venta(BaseModel):
+    """
+    Sales transaction record.
+    Can be linked to a previous separation or be standalone.
+    """
+    class EstadoEntregaChoices(models.TextChoices):
+        POR_ENTREGAR = 'por_entregar', 'Pending Delivery'
+        ENTREGADO = 'entregado', 'Delivered'
+
+    cliente = models.ForeignKey(
+        Cliente,
+        on_delete=models.PROTECT,
+        related_name='ventas',
+        null=False,
+        help_text="Customer making the purchase"
+    )
+    fecha = models.DateTimeField(
+        auto_now_add=True,
+        help_text="Date and time of the sale"
+    )
+    notas = models.TextField(
+        blank=True,
+        null=True,
+        help_text="Optional notes about the sale"
+    )
+    separacion = models.ForeignKey(
+        Separacion,
+        on_delete=models.SET_NULL,
+        related_name='ventas',
+        null=True,
+        blank=True,
+        help_text="Associated hold/separation if this sale originated from one"
+    )
+    estado_entrega = models.CharField(
+        max_length=20,
+        choices=EstadoEntregaChoices.choices,
+        default=EstadoEntregaChoices.POR_ENTREGAR,
+        help_text="Delivery status of the sale"
+    )
+    fecha_entrega = models.DateTimeField(
+        blank=True,
+        null=True,
+        help_text="Date and time when the sale was delivered"
+    )
+    usuario_ultima_modificacion = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        related_name='ventas_modificadas',
+        help_text="Last user who modified this sale"
+    )
+
+    class Meta:
+        verbose_name = "Sale"
+        verbose_name_plural = "Sales"
+        ordering = ['-fecha']
+
+    def __str__(self):
+        return f"Sale {self.id} - {self.cliente.nombre_completo} on {self.fecha.date()}"
+
+
+class ItemVenta(BaseModel):
+    """
+    Line item in a sale.
+    Stores a snapshot of the unit price at the time of sale.
+    """
+    venta = models.ForeignKey(
+        Venta,
+        on_delete=models.CASCADE,
+        related_name='items',
+        null=False,
+        help_text="Sale this item belongs to"
+    )
+    unidad_producto = models.ForeignKey(
+        UnidadProducto,
+        on_delete=models.PROTECT,
+        related_name='items_venta',
+        null=False,
+        help_text="Specific unit being sold"
+    )
+    precio = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        null=False,
+        help_text="Price at the time of sale (snapshot)"
+    )
+
+    class Meta:
+        verbose_name = "Sale Item"
+        verbose_name_plural = "Sale Items"
+        unique_together = [('venta', 'unidad_producto')]
+
+    def __str__(self):
+        return f"Item: {self.unidad_producto.serial} - ${self.precio}"
+
+
+class Recibo(BaseModel):
+    """
+    Receipt/invoice link for a sale or separation.
+    Can be linked to either a Venta or Separacion (but not both).
+    """
+    venta = models.OneToOneField(
+        Venta,
+        on_delete=models.CASCADE,
+        related_name='recibo',
+        null=True,
+        blank=True,
+        help_text="Associated sale (if receipt is for a sale)"
+    )
+    separacion = models.OneToOneField(
+        Separacion,
+        on_delete=models.CASCADE,
+        related_name='recibo',
+        null=True,
+        blank=True,
+        help_text="Associated hold (if receipt is for a separation)"
+    )
+    url = models.URLField(
+        max_length=500,
+        null=False,
+        help_text="URL to the receipt (Drive, S3, etc.)"
+    )
+    fecha_documento = models.DateField(
+        blank=True,
+        null=True,
+        help_text="Date the receipt was generated (optional)"
+    )
+
+    class Meta:
+        verbose_name = "Receipt"
+        verbose_name_plural = "Receipts"
+
+    def __str__(self):
+        if self.venta:
+            return f"Receipt for Sale {self.venta.id}"
+        elif self.separacion:
+            return f"Receipt for Hold {self.separacion.id}"
+        return f"Receipt {self.id}"
 
 
 class Invoice(models.Model):
