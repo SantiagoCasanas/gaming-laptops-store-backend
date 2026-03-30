@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.db import transaction
-from .models import Invoice, Cliente, SolicitudBajoPedido, Separacion, Venta, ItemVenta, Recibo, Departamento, Ciudad
+from .models import Invoice, Cliente, SolicitudBajoPedido, Separacion, Venta, ItemVenta, Departamento, Ciudad
 
 
 # ---------------------------------------------------------------------------
@@ -61,15 +61,14 @@ class SolicitudBajoPedidoSerializer(serializers.ModelSerializer):
     Serializer for SolicitudBajoPedido model.
     Used for listing and retrieving back order information.
     """
-    producto_nombre = serializers.CharField(source='producto.nombre', read_only=True)
+    bajo_pedido_str = serializers.CharField(source='bajo_pedido.__str__', read_only=True)
     cliente_nombre = serializers.CharField(source='cliente.nombre_completo', read_only=True)
-    condicion_display = serializers.CharField(source='get_condicion_display', read_only=True)
     estado_display = serializers.CharField(source='get_estado_display', read_only=True)
 
     class Meta:
         model = SolicitudBajoPedido
         fields = [
-            'id', 'producto', 'producto_nombre', 'condicion', 'condicion_display', 'cliente', 'cliente_nombre',
+            'id', 'bajo_pedido', 'bajo_pedido_str', 'cliente', 'cliente_nombre',
             'valor_abono', 'fecha_solicitud', 'fecha_maxima_compra', 'orden_compra',
             'estado', 'estado_display', 'active'
         ]
@@ -82,7 +81,7 @@ class SolicitudBajoPedidoCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = SolicitudBajoPedido
         fields = [
-            'producto', 'condicion', 'cliente', 'valor_abono', 'fecha_maxima_compra'
+            'bajo_pedido', 'cliente', 'valor_abono', 'fecha_maxima_compra'
         ]
 
     def create(self, validated_data):
@@ -193,7 +192,7 @@ class CiudadByCiudadDepartamentoSerializer(serializers.ModelSerializer):
 
 
 # ---------------------------------------------------------------------------
-# Venta, ItemVenta, Recibo Serializers
+# Venta, ItemVenta Serializers
 # ---------------------------------------------------------------------------
 
 class ItemVentaSerializer(serializers.ModelSerializer):
@@ -256,35 +255,6 @@ class VentaCreateSerializer(serializers.ModelSerializer):
         return venta
 
 
-class ReciboSerializer(serializers.ModelSerializer):
-    """Serializer for Recibo model."""
-    venta_id = serializers.IntegerField(source='venta.id', read_only=True, allow_null=True)
-    separacion_id = serializers.IntegerField(source='separacion.id', read_only=True, allow_null=True)
-
-    class Meta:
-        model = Recibo
-        fields = ['id', 'venta', 'venta_id', 'separacion', 'separacion_id', 'url', 'fecha_documento', 'active']
-
-
-class ReciboCreateSerializer(serializers.ModelSerializer):
-    """Serializer for creating Recibo."""
-    class Meta:
-        model = Recibo
-        fields = ['venta', 'separacion', 'url', 'fecha_documento']
-
-    def validate(self, attrs):
-        """Ensure either venta or separacion is provided, but not both."""
-        if not attrs.get('venta') and not attrs.get('separacion'):
-            raise serializers.ValidationError("Either venta or separacion must be provided")
-        if attrs.get('venta') and attrs.get('separacion'):
-            raise serializers.ValidationError("Cannot link to both venta and separacion")
-        return attrs
-
-    def create(self, validated_data):
-        """Create Recibo."""
-        return Recibo.objects.create(**validated_data)
-
-
 # ---------------------------------------------------------------------------
 # Invoice Serializers
 # ---------------------------------------------------------------------------
@@ -292,17 +262,19 @@ class ReciboCreateSerializer(serializers.ModelSerializer):
 class InvoiceSerializer(serializers.ModelSerializer):
     bill_id = serializers.CharField(read_only=True)
     file_path = serializers.CharField(read_only=True, allow_null=True)
+    cliente_nombre = serializers.CharField(source='cliente.nombre_completo', read_only=True)
+    cliente_cedula = serializers.CharField(source='cliente.cedula', read_only=True)
 
     class Meta:
         model = Invoice
         fields = [
             'id',
             'bill_id',
-            'client_name',
-            'client_document',
-            'client_phone',
-            'client_address',
-            'client_email',
+            'cliente',
+            'cliente_nombre',
+            'cliente_cedula',
+            'venta',
+            'separacion',
             'concepto',
             'item',
             'serial_item',
@@ -311,17 +283,20 @@ class InvoiceSerializer(serializers.ModelSerializer):
             'due_date',
             'file_path',
             'email_sent',
+            'active',
             'created_at',
             'updated_at',
         ]
-        read_only_fields = ['id', 'bill_id', 'file_path', 'email_sent', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'bill_id', 'file_path', 'email_sent', 'active', 'created_at', 'updated_at']
 
     def validate(self, attrs):
-        required_fields = [
-            'client_name', 'client_document', 'client_phone',
-            'client_address', 'client_email', 'concepto', 'item',
-            'serial_item', 'total_amount', 'payment_method', 'due_date',
-        ]
+        # Validate that venta and separacion are not both provided
+        if attrs.get('venta') and attrs.get('separacion'):
+            raise serializers.ValidationError(
+                "An invoice cannot be linked to both a venta and a separacion."
+            )
+        # Required fields validation
+        required_fields = ['cliente', 'concepto', 'item', 'serial_item', 'total_amount', 'payment_method', 'due_date']
         errors = {}
         for field in required_fields:
             value = attrs.get(field)
@@ -338,11 +313,9 @@ class InvoiceUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Invoice
         fields = [
-            'client_name',
-            'client_document',
-            'client_phone',
-            'client_address',
-            'client_email',
+            'cliente',
+            'venta',
+            'separacion',
             'concepto',
             'item',
             'serial_item',

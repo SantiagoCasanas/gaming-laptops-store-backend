@@ -75,12 +75,6 @@ class SolicitudBajoPedido(BaseModel):
     Represents a customer's individual request to purchase a product that is not currently in stock.
     Customer requests a specific product with condition, pays a deposit, and an OrdenCompra is created to source it.
     """
-    class CondicionChoices(models.TextChoices):
-        NUEVO = 'nuevo', 'New'
-        OPEN_BOX = 'open_box', 'Open Box'
-        REFURBISHED = 'refurbished', 'Refurbished'
-        USADO = 'usado', 'Used'
-
     class EstadoChoices(models.TextChoices):
         POR_COMPRAR = 'por_comprar', 'Pending Purchase'
         ACTIVA = 'activa', 'Active'
@@ -88,17 +82,12 @@ class SolicitudBajoPedido(BaseModel):
         EXPIRADA = 'expirada', 'Expired'
         CANCELADA = 'cancelada', 'Cancelled'
 
-    producto = models.ForeignKey(
-        'products.Producto',
+    bajo_pedido = models.ForeignKey(
+        'products.BajoPedido',
         on_delete=models.PROTECT,
         related_name='solicitudes_bajo_pedido',
         null=False,
-        help_text="Product the customer is requesting"
-    )
-    condicion = models.CharField(
-        max_length=20,
-        choices=CondicionChoices.choices,
-        help_text="Desired condition of the product"
+        help_text="On-demand product listing the customer is requesting"
     )
     cliente = models.ForeignKey(
         Cliente,
@@ -148,10 +137,10 @@ class SolicitudBajoPedido(BaseModel):
         verbose_name = "Customer Back Order Request"
         verbose_name_plural = "Customer Back Order Requests"
         ordering = ['-fecha_solicitud']
-        unique_together = [('producto', 'condicion', 'cliente')]
+        unique_together = [('bajo_pedido', 'cliente')]
 
     def __str__(self):
-        return f"Back order request: {self.cliente.nombre_completo} - {self.producto.nombre} ({self.condicion})"
+        return f"Back order request: {self.cliente.nombre_completo} - {self.bajo_pedido}"
 
 
 class Separacion(BaseModel):
@@ -314,51 +303,12 @@ class ItemVenta(BaseModel):
         return f"Item: {self.unidad_producto.serial} - ${self.precio}"
 
 
-class Recibo(BaseModel):
+class Invoice(BaseModel):
     """
-    Receipt/invoice link for a sale or separation.
-    Can be linked to either a Venta or Separacion (but not both).
+    Full invoice with document generation, email delivery, and file storage.
+    Linked to a Cliente (FK), and optionally to a Venta or Separacion.
+    Inherits active, created_at, updated_at from BaseModel.
     """
-    venta = models.OneToOneField(
-        Venta,
-        on_delete=models.CASCADE,
-        related_name='recibo',
-        null=True,
-        blank=True,
-        help_text="Associated sale (if receipt is for a sale)"
-    )
-    separacion = models.OneToOneField(
-        Separacion,
-        on_delete=models.CASCADE,
-        related_name='recibo',
-        null=True,
-        blank=True,
-        help_text="Associated hold (if receipt is for a separation)"
-    )
-    url = models.URLField(
-        max_length=500,
-        null=False,
-        help_text="URL to the receipt (Drive, S3, etc.)"
-    )
-    fecha_documento = models.DateField(
-        blank=True,
-        null=True,
-        help_text="Date the receipt was generated (optional)"
-    )
-
-    class Meta:
-        verbose_name = "Receipt"
-        verbose_name_plural = "Receipts"
-
-    def __str__(self):
-        if self.venta:
-            return f"Receipt for Sale {self.venta.id}"
-        elif self.separacion:
-            return f"Receipt for Hold {self.separacion.id}"
-        return f"Receipt {self.id}"
-
-
-class Invoice(models.Model):
     CONCEPTO_CHOICES = [
         ('venta', 'Venta'),
         ('separacion', 'Separación'),
@@ -379,12 +329,32 @@ class Invoice(models.Model):
     # Generated invoice ID: YYYYMMDD-{serial_item}
     bill_id = models.CharField(max_length=100, unique=True, editable=False)
 
-    # Client data
-    client_name = models.CharField(max_length=200)
-    client_document = models.CharField(max_length=50)
-    client_phone = models.CharField(max_length=30)
-    client_address = models.CharField(max_length=300)
-    client_email = models.EmailField()
+    # Client FK (replaces denormalized client_* fields)
+    cliente = models.ForeignKey(
+        Cliente,
+        on_delete=models.PROTECT,
+        related_name='invoices',
+        null=False,
+        help_text="Customer this invoice belongs to"
+    )
+
+    # Optional transaction links (mutually exclusive)
+    venta = models.ForeignKey(
+        Venta,
+        on_delete=models.SET_NULL,
+        related_name='invoices',
+        null=True,
+        blank=True,
+        help_text="Associated sale (optional)"
+    )
+    separacion = models.ForeignKey(
+        Separacion,
+        on_delete=models.SET_NULL,
+        related_name='invoices',
+        null=True,
+        blank=True,
+        help_text="Associated hold/separation (optional)"
+    )
 
     # Sale data
     concepto = models.CharField(max_length=20, choices=CONCEPTO_CHOICES)
@@ -394,11 +364,7 @@ class Invoice(models.Model):
     payment_method = models.CharField(max_length=30, choices=PAYMENT_METHOD_CHOICES)
     due_date = models.DateField()
 
-    # Metadata
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    # R2 file path
+    # R2 / local file path
     file_path = models.CharField(max_length=500, blank=True, null=True)
     email_sent = models.BooleanField(default=False)
 
@@ -409,7 +375,7 @@ class Invoice(models.Model):
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.bill_id} - {self.client_name}"
+        return f"{self.bill_id} - {self.cliente.nombre_completo}"
 
     class Meta:
-        ordering = ['-created_at']
+        ordering = ['-id']

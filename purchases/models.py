@@ -2,19 +2,13 @@ from django.db import models
 from django.conf import settings
 from core.models import BaseModel
 from products.models import UnidadProducto, Proveedor
-from sales.models import Cliente
 
 
 class OrdenCompra(BaseModel):
     """
     Purchase order for a specific unit.
-    Can represent either an external purchase or a product received as trade-in.
     Automatically creates a UnidadProducto when the order is created.
     """
-    class TipoChoices(models.TextChoices):
-        COMPRA_EXTERNA = 'compra_externa', 'External Purchase'
-        CANJE_CLIENTE = 'canje_cliente', 'Trade-in from Client'
-
     class EstadoLogisticoChoices(models.TextChoices):
         VIAJANDO = 'viajando', 'In Transit'
         EN_OFICINA_IMPORTADORA = 'en_oficina_importadora', 'At Importer Office'
@@ -31,19 +25,13 @@ class OrdenCompra(BaseModel):
     condicion = models.CharField(
         max_length=20,
         choices=[
-            ('nuevo', 'New'),
+            ('nuevo', 'Nuevo'),
             ('open_box', 'Open Box'),
-            ('refurbished', 'Refurbished'),
-            ('usado', 'Used')
+            ('refurbished', 'Reacondicionado'),
+            ('usado', 'Usado')
         ],
         default='nuevo',
         help_text="Physical condition of the unit being created"
-    )
-    serial_generado = models.CharField(
-        max_length=100,
-        blank=True,
-        null=True,
-        help_text="Serial number for the unit (auto-generated if not provided)"
     )
     unidad_producto = models.OneToOneField(
         UnidadProducto,
@@ -52,13 +40,6 @@ class OrdenCompra(BaseModel):
         null=True,
         blank=True,
         help_text="Specific unit created for this purchase order (auto-created on save)"
-    )
-    tipo = models.CharField(
-        max_length=20,
-        choices=TipoChoices.choices,
-        default=TipoChoices.COMPRA_EXTERNA,
-        null=False,
-        help_text="Type of purchase: external or trade-in"
     )
     estado_logistico = models.CharField(
         max_length=30,
@@ -73,15 +54,7 @@ class OrdenCompra(BaseModel):
         related_name='ordenes_compra',
         null=True,
         blank=True,
-        help_text="Supplier (used for external purchases)"
-    )
-    cliente = models.ForeignKey(
-        Cliente,
-        on_delete=models.SET_NULL,
-        related_name='ordenes_compra',
-        null=True,
-        blank=True,
-        help_text="Customer (used for trade-in purchases)"
+        help_text="Supplier for this purchase"
     )
     numero_orden = models.CharField(
         max_length=100,
@@ -99,13 +72,6 @@ class OrdenCompra(BaseModel):
         decimal_places=2,
         null=False,
         help_text="Purchase cost (typically in USD)"
-    )
-    precio_venta = models.DecimalField(
-        max_digits=14,
-        decimal_places=2,
-        null=True,
-        blank=True,
-        help_text="Selling price for created unit; if blank, auto-calculated via formula"
     )
     costo_importacion = models.DecimalField(
         max_digits=14,
@@ -146,13 +112,14 @@ class OrdenCompra(BaseModel):
 
         super().save(*args, **kwargs)
 
-        # Create or update the associated unit if no unit exists yet
+        # If unit already exists, sync estado_producto when logistic status changes
+        if self.unidad_producto and self.estado_logistico != 'viajando':
+            self.unidad_producto.estado_producto = 'en_stock'
+            self.unidad_producto.save(update_fields=['estado_producto'])
+
+        # Create the associated unit if none exists yet
         if not self.unidad_producto:
-            # Generate serial if not provided
-            serial = self.serial_generado
-            if not serial:
-                # Generate serial: ORD-{numero_orden}-{uuid[:8]}
-                serial = f"ORD-{self.numero_orden}-{str(uuid.uuid4())[:8]}"
+            serial = f"SIN-SERIAL-{self.numero_orden}-{str(uuid.uuid4())[:6].upper()}"
 
             # Determine initial estado_producto based on logistic status
             if self.estado_logistico == 'viajando':
@@ -162,32 +129,28 @@ class OrdenCompra(BaseModel):
             else:  # en_oficina
                 estado_producto = 'en_stock'
 
-            # Calculate unit price
-            if self.precio_venta:
-                unit_price = self.precio_venta
-            else:
-                # Auto-calculate: ((costo_compra * 1.2) * TRM) + 50, rounded to nearest 90,000
-                trm = get_trm_for_date(now().date())
-                base_price = (self.costo_compra * Decimal('1.2') * trm) + Decimal('50')
-                # Round to nearest 90,000
-                unit_price = (base_price / Decimal('90000')).quantize(Decimal('1')) * Decimal('90000')
+            # Auto-calculate unit price: round((costo_total * 1.2 * TRM - 90000) / 100000) * 100000 + 90000
+            trm = get_trm_for_date(now().date())
+            costo_importacion = self.costo_importacion or Decimal('0')
+            impuesto = self.costo_compra * Decimal('0.02')
+            total_usd = self.costo_compra + costo_importacion + impuesto
+            raw = total_usd * Decimal('1.2') * trm.valor_cop
+            unit_price = (round((raw - Decimal('90000')) / Decimal('100000'))) * Decimal('100000') + Decimal('90000')
 
             # Create the unit
             unidad = UnidadProducto.objects.create(
                 producto=self.producto,
                 condicion=self.condicion,
                 serial=serial,
-                estado_venta='sin_vender',  # New units are not sold yet
+                estado_venta='sin_vender',
                 estado_producto=estado_producto,
                 precio=unit_price,
                 usuario_ultima_modificacion=self.usuario_ultima_modificacion
             )
 
-            # Link the unit to this order
             self.unidad_producto = unidad
-            self.serial_generado = serial
-            super().save(update_fields=['unidad_producto', 'serial_generado'])
+            super().save(update_fields=['unidad_producto'])
 
     def __str__(self):
         serial = self.unidad_producto.serial if self.unidad_producto else "pending"
-        return f"PO {self.numero_orden} - {self.producto.nombre} ({self.condicion}) ({serial})"
+        return f"PO {self.numero_orden} - {self.producto.nombre if self.producto else 'N/A'} ({self.condicion}) ({serial})"

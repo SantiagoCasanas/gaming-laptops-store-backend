@@ -1,8 +1,6 @@
 from rest_framework import serializers
-from django.db import transaction
 from .models import OrdenCompra
 from products.models import UnidadProducto, Proveedor, BajoPedido, Producto
-from sales.models import Cliente, SolicitudBajoPedido
 
 
 class OrdenCompraSerializer(serializers.ModelSerializer):
@@ -11,19 +9,19 @@ class OrdenCompraSerializer(serializers.ModelSerializer):
     Used for listing and retrieving purchase order information.
     """
     unidad_serial = serializers.CharField(source='unidad_producto.serial', read_only=True)
+    unidad_precio = serializers.DecimalField(source='unidad_producto.precio', max_digits=14, decimal_places=2, read_only=True, allow_null=True)
     producto_nombre = serializers.CharField(source='producto.nombre', read_only=True)
     condicion_display = serializers.CharField(source='get_condicion_display', read_only=True)
     proveedor_nombre = serializers.CharField(source='proveedor.nombre', read_only=True, allow_null=True)
-    cliente_nombre = serializers.CharField(source='cliente.nombre_completo', read_only=True, allow_null=True)
     impuesto_importacion = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
 
     class Meta:
         model = OrdenCompra
         fields = [
             'id', 'producto', 'producto_nombre', 'condicion', 'condicion_display',
-            'unidad_producto', 'unidad_serial', 'tipo', 'estado_logistico',
-            'proveedor', 'proveedor_nombre', 'cliente', 'cliente_nombre',
-            'numero_orden', 'numero_tracking', 'costo_compra', 'precio_venta',
+            'unidad_producto', 'unidad_serial', 'unidad_precio', 'estado_logistico',
+            'proveedor', 'proveedor_nombre',
+            'numero_orden', 'numero_tracking', 'costo_compra',
             'costo_importacion', 'impuesto_importacion', 'active'
         ]
 
@@ -32,37 +30,39 @@ class OrdenCompraCreateSerializer(serializers.ModelSerializer):
     """
     Serializer for creating a new purchase order.
     Automatically creates a UnidadProducto when the order is created.
+    precio_venta is write-only: if provided it overrides the auto-calculated unit price;
+    if omitted the unit price is calculated from costs and TRM.
     """
+    precio_venta = serializers.DecimalField(
+        max_digits=14, decimal_places=2,
+        write_only=True, required=False, allow_null=True,
+    )
+
     class Meta:
         model = OrdenCompra
         fields = [
-            'producto', 'condicion', 'tipo', 'proveedor', 'cliente', 'numero_orden',
-            'numero_tracking', 'costo_compra', 'precio_venta', 'costo_importacion', 'estado_logistico'
+            'producto', 'condicion', 'proveedor',
+            'numero_orden', 'numero_tracking', 'costo_compra',
+            'costo_importacion', 'estado_logistico', 'precio_venta',
         ]
 
     def validate(self, attrs):
-        """Ensure tipo-specific fields are provided."""
-        tipo = attrs.get('tipo')
-
-        if tipo == OrdenCompra.TipoChoices.COMPRA_EXTERNA:
-            if not attrs.get('proveedor'):
-                raise serializers.ValidationError(
-                    "External purchases require 'proveedor'"
-                )
-        elif tipo == OrdenCompra.TipoChoices.CANJE_CLIENTE:
-            if not attrs.get('cliente'):
-                raise serializers.ValidationError(
-                    "Trade-in purchases require 'cliente'"
-                )
-
+        """Ensure proveedor is provided."""
+        if not attrs.get('proveedor'):
+            raise serializers.ValidationError("A supplier (proveedor) is required")
         return attrs
 
     def create(self, validated_data):
-        """Create purchase order. UnidadProducto is auto-created via OrdenCompra.save()."""
+        """Create purchase order. UnidadProducto is auto-created via OrdenCompra.save().
+        If precio_venta was supplied, override the auto-calculated unit price."""
+        precio_venta = validated_data.pop('precio_venta', None)
         orden = OrdenCompra.objects.create(
             usuario_ultima_modificacion=self.context.get('request').user if self.context.get('request') else None,
             **validated_data
         )
+        if precio_venta and orden.unidad_producto:
+            orden.unidad_producto.precio = precio_venta
+            orden.unidad_producto.save()
         return orden
 
 
@@ -76,37 +76,14 @@ class OrdenCompraUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = OrdenCompra
         fields = [
-            'tipo', 'proveedor', 'cliente', 'numero_orden',
+            'proveedor', 'numero_orden',
             'numero_tracking', 'costo_compra', 'costo_importacion', 'impuesto_importacion',
             'estado_logistico'
         ]
 
-    def validate(self, attrs):
-        """Ensure tipo-specific fields are provided."""
-        instance = self.instance
-        tipo = attrs.get('tipo', instance.tipo)
-
-        if tipo == OrdenCompra.TipoChoices.COMPRA_EXTERNA:
-            proveedor = attrs.get('proveedor', instance.proveedor)
-            numero_orden = attrs.get('numero_orden', instance.numero_orden)
-            if not proveedor or not numero_orden:
-                raise serializers.ValidationError(
-                    "External purchases require 'proveedor' and 'numero_orden'"
-                )
-        elif tipo == OrdenCompra.TipoChoices.CANJE_CLIENTE:
-            cliente = attrs.get('cliente', instance.cliente)
-            if not cliente:
-                raise serializers.ValidationError(
-                    "Trade-in purchases require 'cliente'"
-                )
-
-        return attrs
-
     def update(self, instance, validated_data):
         """Update and return the purchase order instance."""
-        instance.tipo = validated_data.get('tipo', instance.tipo)
         instance.proveedor = validated_data.get('proveedor', instance.proveedor)
-        instance.cliente = validated_data.get('cliente', instance.cliente)
         instance.numero_orden = validated_data.get('numero_orden', instance.numero_orden)
         instance.numero_tracking = validated_data.get('numero_tracking', instance.numero_tracking)
         instance.costo_compra = validated_data.get('costo_compra', instance.costo_compra)

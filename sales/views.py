@@ -7,14 +7,13 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 
-from .models import Invoice, Cliente, SolicitudBajoPedido, Separacion, Venta, ItemVenta, Recibo, Departamento, Ciudad
+from .models import Invoice, Cliente, SolicitudBajoPedido, Separacion, Venta, ItemVenta, Departamento, Ciudad
 from .serializers import (
     InvoiceSerializer, InvoiceUpdateSerializer, ClienteSerializer, ClienteCreateSerializer,
     ClienteUpdateSerializer, SolicitudBajoPedidoSerializer, SolicitudBajoPedidoCreateSerializer,
     SolicitudBajoPedidoUpdateSerializer, SeparacionSerializer, SeparacionCreateSerializer,
     SeparacionUpdateSerializer, DepartamentoSerializer, CiudadSerializer, CiudadByCiudadDepartamentoSerializer,
     VentaSerializer, VentaCreateSerializer, ItemVentaSerializer, ItemVentaCreateSerializer,
-    ReciboSerializer, ReciboCreateSerializer
 )
 from .services.document_service import generate_invoice_document
 from .services.storage_service import save_invoice, get_invoice_bytes
@@ -425,66 +424,11 @@ class VentaDetailView(RetrieveAPIView):
     lookup_field = 'pk'
 
 
-# ---------------------------------------------------------------------------
-# Recibo Views
-# ---------------------------------------------------------------------------
-
-class ReciboListView(ListAPIView):
-    """List all receipts."""
-    queryset = Recibo.objects.all()
-    serializer_class = ReciboSerializer
-    permission_classes = [IsAuthenticated]
-
-
-class ReciboCreateView(CreateAPIView):
-    """Create a new receipt."""
-    serializer_class = ReciboCreateSerializer
-    permission_classes = [IsAuthenticated]
-
-    def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        recibo = serializer.save()
-
-        return Response({
-            'message': 'Receipt created successfully',
-            'recibo': ReciboSerializer(recibo).data
-        }, status=status.HTTP_201_CREATED)
-
-
-class ReciboUpdateView(UpdateAPIView):
-    """Update receipt information."""
-    queryset = Recibo.objects.all()
-    serializer_class = ReciboCreateSerializer
-    permission_classes = [IsAuthenticated]
-    lookup_field = 'pk'
-
-    def update(self, request, *args, **kwargs):
-        partial = kwargs.pop('partial', False)
-        instance = self.get_object()
-        serializer = self.get_serializer(instance, data=request.data, partial=partial)
-        serializer.is_valid(raise_exception=True)
-        self.perform_update(serializer)
-
-        return Response({
-            'message': 'Receipt updated successfully',
-            'recibo': ReciboSerializer(instance).data
-        }, status=status.HTTP_200_OK)
-
-
-class ReciboDetailView(RetrieveAPIView):
-    """Get receipt details."""
-    queryset = Recibo.objects.all()
-    serializer_class = ReciboSerializer
-    permission_classes = [IsAuthenticated]
-    lookup_field = 'pk'
-
-
 class InvoiceListView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        invoices = Invoice.objects.all()
+        invoices = Invoice.objects.select_related('cliente', 'venta', 'separacion').all()
         serializer = InvoiceSerializer(invoices, many=True)
         return Response({'message': 'Facturas obtenidas exitosamente.', 'invoices': serializer.data})
 
@@ -555,7 +499,7 @@ class InvoiceDetailView(APIView):
 
     def get(self, request, pk):
         try:
-            invoice = Invoice.objects.get(pk=pk)
+            invoice = Invoice.objects.select_related('cliente', 'venta', 'separacion').get(pk=pk)
         except Invoice.DoesNotExist:
             return Response({'error': 'Factura no encontrada.'}, status=status.HTTP_404_NOT_FOUND)
         serializer = InvoiceSerializer(invoice)
@@ -573,7 +517,7 @@ class InvoiceUpdateView(APIView):
 
     def _update(self, request, pk, partial):
         try:
-            invoice = Invoice.objects.get(pk=pk)
+            invoice = Invoice.objects.select_related('cliente', 'venta', 'separacion').get(pk=pk)
         except Invoice.DoesNotExist:
             return Response({'error': 'Factura no encontrada.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -602,7 +546,7 @@ class InvoiceDownloadView(APIView):
 
     def get(self, request, pk):
         try:
-            invoice = Invoice.objects.get(pk=pk)
+            invoice = Invoice.objects.select_related('cliente', 'venta', 'separacion').get(pk=pk)
         except Invoice.DoesNotExist:
             return Response({'error': 'Factura no encontrada.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -630,7 +574,7 @@ class InvoiceResendEmailView(APIView):
 
     def post(self, request, pk):
         try:
-            invoice = Invoice.objects.get(pk=pk)
+            invoice = Invoice.objects.select_related('cliente', 'venta', 'separacion').get(pk=pk)
         except Invoice.DoesNotExist:
             return Response({'error': 'Factura no encontrada.'}, status=status.HTTP_404_NOT_FOUND)
 

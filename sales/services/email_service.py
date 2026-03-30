@@ -61,7 +61,7 @@ def send_invoice_email(invoice, file_bytes: bytes) -> bool:
             <td style="padding:40px;">
               <h2 style="color:#0A1628;margin:0 0 8px;font-size:20px;">Tu Factura de Compra</h2>
               <p style="color:#64748b;margin:0 0 32px;font-size:14px;">
-                Hola <strong>{invoice.client_name}</strong>, adjuntamos tu factura correspondiente a tu {concepto_display.lower()}.
+                Hola <strong>{invoice.cliente.nombre_completo}</strong>, adjuntamos tu factura correspondiente a tu {concepto_display.lower()}.
               </p>
               <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border-radius:6px;border:1px solid #e2e8f0;margin-bottom:32px;">
                 <tr>
@@ -127,7 +127,7 @@ def send_invoice_email(invoice, file_bytes: bytes) -> bool:
 
         params: resend.Emails.SendParams = {
             "from": "sales@patecnologicos.com",
-            "to": [invoice.client_email],
+            "to": [invoice.cliente.correo],
             "subject": f"Tu factura de compra - Patecnologicos - {invoice.bill_id}",
             "html": html_body,
             "attachments": [

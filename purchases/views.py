@@ -18,7 +18,7 @@ class OrdenCompraListView(ListAPIView):
 
     def get_queryset(self):
         return OrdenCompra.objects.select_related(
-            'producto', 'producto__marca', 'proveedor', 'cliente', 'unidad_producto'
+            'producto', 'producto__marca', 'proveedor', 'unidad_producto'
         ).all()
 
 
@@ -39,7 +39,7 @@ class OrdenCompraCreateView(CreateAPIView):
             'message': 'Purchase order created successfully',
             'orden_compra': OrdenCompraSerializer(
                 OrdenCompra.objects.select_related(
-                    'producto', 'producto__marca', 'proveedor', 'cliente', 'unidad_producto'
+                    'producto', 'producto__marca', 'proveedor', 'unidad_producto'
                 ).get(pk=orden.pk)
             ).data
         }, status=status.HTTP_201_CREATED)
@@ -56,7 +56,7 @@ class OrdenCompraUpdateView(UpdateAPIView):
 
     def get_queryset(self):
         return OrdenCompra.objects.select_related(
-            'producto', 'producto__marca', 'proveedor', 'cliente', 'unidad_producto'
+            'producto', 'producto__marca', 'proveedor', 'unidad_producto'
         ).all()
 
     def update(self, request, *args, **kwargs):
@@ -70,7 +70,7 @@ class OrdenCompraUpdateView(UpdateAPIView):
             'message': 'Purchase order updated successfully',
             'orden_compra': OrdenCompraSerializer(
                 OrdenCompra.objects.select_related(
-                    'producto', 'producto__marca', 'proveedor', 'cliente', 'unidad_producto'
+                    'producto', 'producto__marca', 'proveedor', 'unidad_producto'
                 ).get(pk=updated_instance.pk)
             ).data
         }, status=status.HTTP_200_OK)
@@ -87,7 +87,7 @@ class OrdenCompraDetailView(RetrieveAPIView):
 
     def get_queryset(self):
         return OrdenCompra.objects.select_related(
-            'producto', 'producto__marca', 'proveedor', 'cliente', 'unidad_producto'
+            'producto', 'producto__marca', 'proveedor', 'unidad_producto'
         ).all()
 
 

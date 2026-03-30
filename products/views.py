@@ -4,14 +4,11 @@ from rest_framework.generics import ListAPIView, CreateAPIView, UpdateAPIView, R
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
-from .models import Brand, Category, TipoProducto, CampoProducto, Proveedor, Producto, Descuento, UnidadProducto, BajoPedido
+from .models import Brand, TipoProducto, CampoProducto, Proveedor, Producto, Descuento, UnidadProducto, BajoPedido
 from .serializers import (
     BrandSerializer,
     BrandCreateSerializer,
     BrandUpdateSerializer,
-    CategorySerializer,
-    CategoryCreateSerializer,
-    CategoryUpdateSerializer,
     TipoProductoSerializer,
     TipoProductoCreateSerializer,
     TipoProductoUpdateSerializer,
@@ -146,118 +143,6 @@ class BrandDeactivateView(APIView):
         return Response({
             'message': 'Brand deactivated successfully',
             'brand': BrandSerializer(brand).data
-        }, status=status.HTTP_200_OK)
-
-
-# Category Views
-
-class CategoryListView(ListAPIView):
-    """
-    View to list all categories.
-
-    GET: Returns a list of all categories with their information.
-    Requires JWT authentication via Bearer token.
-    """
-    queryset = Category.objects.all()
-    serializer_class = CategorySerializer
-    permission_classes = [IsAuthenticated]
-
-
-class CategoryCreateView(CreateAPIView):
-    """
-    View to create a new category.
-
-    POST: Creates a new category with the provided data.
-    Requires JWT authentication via Bearer token.
-    """
-    serializer_class = CategoryCreateSerializer
-    permission_classes = [IsAuthenticated]
-
-    def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        category = serializer.save()
-
-        return Response({
-            'message': 'Category created successfully',
-            'category': CategorySerializer(category).data
-        }, status=status.HTTP_201_CREATED)
-
-
-class CategoryUpdateView(UpdateAPIView):
-    """
-    View to update category information.
-
-    PATCH/PUT: Updates category information (name, description).
-    Requires JWT authentication via Bearer token.
-    """
-    queryset = Category.objects.all()
-    serializer_class = CategoryUpdateSerializer
-    permission_classes = [IsAuthenticated]
-    lookup_field = 'pk'
-
-    def update(self, request, *args, **kwargs):
-        partial = kwargs.pop('partial', False)
-        instance = self.get_object()
-        serializer = self.get_serializer(instance, data=request.data, partial=partial)
-        serializer.is_valid(raise_exception=True)
-        self.perform_update(serializer)
-
-        return Response({
-            'message': 'Category updated successfully',
-            'category': CategorySerializer(instance).data
-        }, status=status.HTTP_200_OK)
-
-
-class CategoryActivateView(APIView):
-    """
-    View to activate a category.
-
-    POST: Sets active=True for the specified category.
-    Requires JWT authentication via Bearer token.
-    """
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, pk):
-        category = get_object_or_404(Category, pk=pk)
-
-        if category.active:
-            return Response({
-                'message': 'Category is already active'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        category.active = True
-        category.save()
-
-        return Response({
-            'message': 'Category activated successfully',
-            'category': CategorySerializer(category).data
-        }, status=status.HTTP_200_OK)
-
-
-class CategoryDeactivateView(APIView):
-    """
-    View to deactivate a category.
-
-    POST: Sets active=False for the specified category.
-    Requires JWT authentication via Bearer token.
-    """
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, pk):
-        category = get_object_or_404(Category, pk=pk)
-
-        if not category.active:
-            return Response({
-                'message': 'Category is already inactive'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        category.active = False
-        category.save()
-
-        return Response({
-            'message': 'Category deactivated successfully',
-            'category': CategorySerializer(category).data
         }, status=status.HTTP_200_OK)
 
 
@@ -661,7 +546,6 @@ class ProductoListView(ListAPIView):
         return Producto.objects.select_related(
             'marca', 'tipo_producto'
         ).prefetch_related(
-            'producto_categorias__categoria',
             'campo_valores__campo_producto',
             'imagenes',
         ).all()
@@ -687,7 +571,6 @@ class ProductoDetailView(RetrieveAPIView):
         return Producto.objects.select_related(
             'marca', 'tipo_producto'
         ).prefetch_related(
-            'producto_categorias__categoria',
             'campo_valores__campo_producto',
             'imagenes',
         ).all()
@@ -724,7 +607,6 @@ class ProductoCreateView(APIView):
             'descripcion': request.data.get('descripcion', ''),
             'marca': request.data.get('marca'),
             'tipo_producto': request.data.get('tipo_producto'),
-            'categorias': [int(c) for c in request.data.getlist('categorias')] if request.data.getlist('categorias') else [],
             'campo_valores': campo_valores,
         }
 
@@ -757,7 +639,6 @@ class ProductoUpdateView(APIView):
 
         producto = get_object_or_404(
             Producto.objects.select_related('marca', 'tipo_producto').prefetch_related(
-                'producto_categorias__categoria',
                 'campo_valores__campo_producto',
                 'imagenes',
             ),
@@ -781,8 +662,6 @@ class ProductoUpdateView(APIView):
             data['marca'] = request.data.get('marca')
         if request.data.get('tipo_producto'):
             data['tipo_producto'] = request.data.get('tipo_producto')
-        if request.data.getlist('categorias'):
-            data['categorias'] = [int(c) for c in request.data.getlist('categorias')]
         if campo_valores is not None:
             data['campo_valores'] = campo_valores
         if request.data.getlist('remove_images'):

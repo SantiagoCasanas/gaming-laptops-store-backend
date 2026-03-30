@@ -18,7 +18,7 @@ def get_image_upload_path(instance, filename):
 
 
 # ---------------------------------------------------------------------------
-# Kept models (Brand, Category) — no structural changes
+# Kept models (Brand) — no structural changes
 # ---------------------------------------------------------------------------
 
 class Brand(BaseModel):
@@ -31,28 +31,6 @@ class Brand(BaseModel):
     class Meta:
         verbose_name = "Brand"
         verbose_name_plural = "Brands"
-        ordering = ['name']
-
-    def save(self, *args, **kwargs):
-        if not self.slug:
-            self.slug = slugify(self.name)
-        super().save(*args, **kwargs)
-
-    def __str__(self):
-        return self.name
-
-
-class Category(BaseModel):
-    """Model that represents the product's category, e.g.: Portátiles, Tarjetas Gráficas."""
-    name = models.CharField(max_length=100, unique=True, null=False, help_text="Category's name")
-    slug = models.SlugField(max_length=120, unique=True, blank=True, help_text="URL slug, auto-generated")
-    description = models.TextField(blank=True, null=True, help_text="Optional description of the category")
-    created_at = models.DateTimeField(auto_now_add=True, null=True)
-    updated_at = models.DateTimeField(auto_now=True, null=True)
-
-    class Meta:
-        verbose_name = "Category"
-        verbose_name_plural = "Categories"
         ordering = ['name']
 
     def save(self, *args, **kwargs):
@@ -103,10 +81,6 @@ class CampoProducto(BaseModel):
         null=False,
         help_text="Data type of this field"
     )
-    required = models.BooleanField(
-        default=False,
-        help_text="Whether this field must be filled in when creating or editing a product"
-    )
 
     class Meta:
         verbose_name = "Product Field"
@@ -142,6 +116,10 @@ class TipoProductoCampo(models.Model):
         default=False,
         help_text="Whether this field is required when creating or editing a product of this type"
     )
+    is_filter = models.BooleanField(
+        default=False,
+        help_text="Define if a field is a filterable attribute (e.g. for faceted search)"
+    )
 
     class Meta:
         verbose_name = "Product Type Field"
@@ -175,12 +153,6 @@ class Producto(BaseModel):
         null=False,
         help_text="Product type that defines which dynamic fields apply"
     )
-    categorias = models.ManyToManyField(
-        Category,
-        through='ProductoCategoria',
-        related_name='productos',
-        help_text="Categories this product belongs to"
-    )
     usuario_ultima_modificacion = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -195,32 +167,6 @@ class Producto(BaseModel):
 
     def __str__(self):
         return f"{self.marca.name} - {self.nombre}"
-
-
-class ProductoCategoria(models.Model):
-    """
-    Explicit junction table for the Producto <-> Category M2M relationship.
-    """
-    producto = models.ForeignKey(
-        Producto,
-        on_delete=models.CASCADE,
-        related_name='producto_categorias',
-        help_text="Product"
-    )
-    categoria = models.ForeignKey(
-        Category,
-        on_delete=models.CASCADE,
-        related_name='producto_categorias',
-        help_text="Category"
-    )
-
-    class Meta:
-        verbose_name = "Product Category"
-        verbose_name_plural = "Product Categories"
-        unique_together = [('producto', 'categoria')]
-
-    def __str__(self):
-        return f"{self.producto.nombre} -> {self.categoria.name}"
 
 
 class ProductoCampoValor(models.Model):
@@ -311,10 +257,10 @@ class BajoPedido(BaseModel):
     Not a real unit - updated daily by Celery based on supplier availability.
     """
     class CondicionChoices(models.TextChoices):
-        NUEVO = 'nuevo', 'New'
+        NUEVO = 'nuevo', 'Nuevo'
         OPEN_BOX = 'open_box', 'Open Box'
-        REFURBISHED = 'refurbished', 'Refurbished'
-        USADO = 'usado', 'Used'
+        REFURBISHED = 'refurbished', 'Reacondicionado'
+        USADO = 'usado', 'Usado'
 
     class EstadoChoices(models.TextChoices):
         ACTIVO = 'activo', 'Active'
@@ -380,10 +326,10 @@ class UnidadProducto(BaseModel):
     Tracks serial number, sale state, physical state, condition, and individual price.
     """
     class CondicionChoices(models.TextChoices):
-        NUEVO = 'nuevo', 'New'
+        NUEVO = 'nuevo', 'Nuevo'
         OPEN_BOX = 'open_box', 'Open Box'
-        REFURBISHED = 'refurbished', 'Refurbished'
-        USADO = 'usado', 'Used'
+        REFURBISHED = 'refurbished', 'Reacondicionado'
+        USADO = 'usado', 'Usado'
 
     class EstadoVentaChoices(models.TextChoices):
         SIN_VENDER = 'sin_vender', 'Not Sold'
@@ -459,10 +405,10 @@ class Descuento(BaseModel):
     Applies to all sin_vender units matching (producto, condicion).
     """
     class CondicionChoices(models.TextChoices):
-        NUEVO = 'nuevo', 'New'
+        NUEVO = 'nuevo', 'Nuevo'
         OPEN_BOX = 'open_box', 'Open Box'
-        REFURBISHED = 'refurbished', 'Refurbished'
-        USADO = 'usado', 'Used'
+        REFURBISHED = 'refurbished', 'Reacondicionado'
+        USADO = 'usado', 'Usado'
 
     producto = models.ForeignKey(
         Producto,

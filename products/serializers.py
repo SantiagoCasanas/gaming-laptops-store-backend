@@ -1,8 +1,8 @@
 from rest_framework import serializers
 from django.db import transaction
 from .models import (
-    Brand, Category, TipoProducto, CampoProducto, TipoProductoCampo, Proveedor,
-    Producto, ProductoCategoria, ProductoCampoValor, ImagenProducto,
+    Brand, TipoProducto, CampoProducto, TipoProductoCampo, Proveedor,
+    Producto, ProductoCampoValor, ImagenProducto,
     BajoPedido, Descuento, UnidadProducto
 )
 
@@ -44,55 +44,6 @@ class BrandUpdateSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         """Update and return the brand instance."""
         instance.name = validated_data.get('name', instance.name)
-        instance.save()
-        return instance
-
-
-class CategorySerializer(serializers.ModelSerializer):
-    """
-    Serializer for Category model.
-    Used for listing and retrieving category information.
-    """
-    class Meta:
-        model = Category
-        fields = ['id', 'name', 'slug', 'description', 'active']
-        read_only_fields = ['slug']
-
-
-class CategoryCreateSerializer(serializers.ModelSerializer):
-    """
-    Serializer for creating a new category.
-    """
-    class Meta:
-        model = Category
-        fields = ['name', 'description']
-        extra_kwargs = {
-            'description': {'required': False},
-        }
-
-    def create(self, validated_data):
-        """Create and return a new category instance."""
-        category = Category.objects.create(**validated_data)
-        return category
-
-
-class CategoryUpdateSerializer(serializers.ModelSerializer):
-    """
-    Serializer for updating category information.
-    Allows modification of name and description.
-    """
-    class Meta:
-        model = Category
-        fields = ['name', 'description']
-        extra_kwargs = {
-            'name': {'required': False},
-            'description': {'required': False},
-        }
-
-    def update(self, instance, validated_data):
-        """Update and return the category instance."""
-        instance.name = validated_data.get('name', instance.name)
-        instance.description = validated_data.get('description', instance.description)
         instance.save()
         return instance
 
@@ -400,11 +351,10 @@ class ProductoSerializer(serializers.ModelSerializer):
     """
     Read serializer for Producto.
     Used for list and detail views. Includes nested marca, tipo_producto,
-    categorias, campo_valores, and imagenes.
+    campo_valores, and imagenes.
     """
     marca_nombre = serializers.CharField(source='marca.name', read_only=True)
     tipo_producto_nombre = serializers.CharField(source='tipo_producto.nombre', read_only=True)
-    categorias_data = serializers.SerializerMethodField()
     campo_valores = ProductoCampoValorSerializer(many=True, read_only=True)
     imagenes = ImagenProductoSerializer(many=True, read_only=True)
 
@@ -414,12 +364,8 @@ class ProductoSerializer(serializers.ModelSerializer):
             'id', 'nombre', 'descripcion', 'active',
             'marca', 'marca_nombre',
             'tipo_producto', 'tipo_producto_nombre',
-            'categorias_data', 'campo_valores', 'imagenes',
+            'campo_valores', 'imagenes',
         ]
-
-    def get_categorias_data(self, obj):
-        """Return list of {id, name} dicts for associated categories."""
-        return [{'id': cat.id, 'name': cat.name} for cat in obj.categorias.all()]
 
 
 class ProductoCampoValorWriteSerializer(serializers.Serializer):
@@ -442,22 +388,9 @@ class ProductoCreateSerializer(serializers.Serializer):
     descripcion = serializers.CharField()
     marca = serializers.PrimaryKeyRelatedField(queryset=Brand.objects.all())
     tipo_producto = serializers.PrimaryKeyRelatedField(queryset=TipoProducto.objects.all())
-    categorias = serializers.ListField(
-        child=serializers.IntegerField(), allow_empty=False
-    )
     campo_valores = serializers.ListField(
         child=ProductoCampoValorWriteSerializer(), required=False, allow_empty=True
     )
-
-    def validate_categorias(self, value):
-        """Ensure all provided category IDs exist."""
-        found = set(Category.objects.filter(id__in=value).values_list('id', flat=True))
-        missing = set(value) - found
-        if missing:
-            raise serializers.ValidationError(
-                f'Category ID(s) not found: {sorted(missing)}'
-            )
-        return value
 
     def _resolve_campo_valor(self, campo, raw_value, association_required=False):
         """
@@ -504,14 +437,12 @@ class ProductoCreateSerializer(serializers.Serializer):
     @transaction.atomic
     def create(self, validated_data):
         """
-        Create Producto, ProductoCategoria entries, ProductoCampoValor entries,
-        and ImagenProducto entries atomically.
+        Create Producto, ProductoCampoValor entries, and ImagenProducto entries atomically.
         Images are read from self.context['request'].FILES.
         The required constraint is read from TipoProductoCampo.required (Option B).
         """
         request = self.context['request']
         campo_valores_data = validated_data.pop('campo_valores', [])
-        categorias_ids = validated_data.pop('categorias')
         tipo_producto = validated_data['tipo_producto']
 
         # Create the Producto
@@ -522,10 +453,6 @@ class ProductoCreateSerializer(serializers.Serializer):
             tipo_producto=tipo_producto,
             usuario_ultima_modificacion=request.user,
         )
-
-        # Create category associations
-        for cat_id in categorias_ids:
-            ProductoCategoria.objects.create(producto=producto, categoria_id=cat_id)
 
         # Resolve campo IDs into CampoProducto instances
         campo_ids = [entry['campo_producto'] for entry in campo_valores_data]
@@ -583,9 +510,6 @@ class ProductoUpdateSerializer(serializers.Serializer):
     descripcion = serializers.CharField(required=False)
     marca = serializers.PrimaryKeyRelatedField(queryset=Brand.objects.all(), required=False)
     tipo_producto = serializers.PrimaryKeyRelatedField(queryset=TipoProducto.objects.all(), required=False)
-    categorias = serializers.ListField(
-        child=serializers.IntegerField(), allow_empty=False, required=False
-    )
     campo_valores = serializers.ListField(
         child=ProductoCampoValorWriteSerializer(), required=False, allow_empty=True
     )
@@ -593,16 +517,6 @@ class ProductoUpdateSerializer(serializers.Serializer):
         child=serializers.IntegerField(), required=False, allow_empty=True
     )
     reorder_data = serializers.CharField(required=False, allow_blank=True)
-
-    def validate_categorias(self, value):
-        """Ensure all provided category IDs exist."""
-        found = set(Category.objects.filter(id__in=value).values_list('id', flat=True))
-        missing = set(value) - found
-        if missing:
-            raise serializers.ValidationError(
-                f'Category ID(s) not found: {sorted(missing)}'
-            )
-        return value
 
     def _resolve_campo_valor(self, campo, raw_value, association_required=False):
         """
@@ -648,8 +562,7 @@ class ProductoUpdateSerializer(serializers.Serializer):
     @transaction.atomic
     def update(self, instance, validated_data):
         """
-        Update Producto fields, replace category associations if provided,
-        upsert or rebuild campo_valores, and process image changes.
+        Update Producto fields, upsert or rebuild campo_valores, and process image changes.
         """
         import json
         request = self.context['request']
@@ -671,12 +584,6 @@ class ProductoUpdateSerializer(serializers.Serializer):
 
         instance.usuario_ultima_modificacion = request.user
         instance.save()
-
-        # --- Categories ---
-        if 'categorias' in validated_data:
-            instance.producto_categorias.all().delete()
-            for cat_id in validated_data['categorias']:
-                ProductoCategoria.objects.create(producto=instance, categoria_id=cat_id)
 
         # --- Campo valores ---
         if 'campo_valores' in validated_data:

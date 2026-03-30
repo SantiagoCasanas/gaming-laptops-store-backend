@@ -23,10 +23,6 @@ from .views import (
     VentaListView,
     VentaCreateView,
     VentaDetailView,
-    ReciboListView,
-    ReciboCreateView,
-    ReciboUpdateView,
-    ReciboDetailView,
     InvoiceListView,
     InvoiceCreateView,
     InvoiceDetailView,
@@ -72,12 +68,6 @@ urlpatterns = [
     path('ventas/list/', VentaListView.as_view(), name='venta_list'),
     path('ventas/create/', VentaCreateView.as_view(), name='venta_create'),
     path('ventas/detail/<int:pk>/', VentaDetailView.as_view(), name='venta_detail'),
-
-    # Recibo endpoints
-    path('recibos/list/', ReciboListView.as_view(), name='recibo_list'),
-    path('recibos/create/', ReciboCreateView.as_view(), name='recibo_create'),
-    path('recibos/update/<int:pk>/', ReciboUpdateView.as_view(), name='recibo_update'),
-    path('recibos/detail/<int:pk>/', ReciboDetailView.as_view(), name='recibo_detail'),
 
     # Invoice endpoints
     path('invoices/list/', InvoiceListView.as_view(), name='invoice_list'),

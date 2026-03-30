@@ -47,35 +47,38 @@ def get_trm_for_date(target_date):
 
 def fetch_and_store_trm():
     """
-    Fetch TRM from the Superfinanciera API and store in database.
+    Fetch TRM from the trm-colombia API and store in database.
 
-    This is an optional utility function that can be called as a periodic task
-    to automatically update TRM values. Currently not used by the main automation.
+    API: https://trm-colombia.vercel.app/?date=YYYY-MM-DD
+    Response: { "data": { "value": 3704.17, "validityFrom": "2026-03-19T05:00:00.000Z", ... } }
 
     Returns:
         dict: Result with 'success' and 'message' keys
     """
     try:
-        # Call the TRM API
+        from datetime import datetime
+        today_str = date.today().strftime('%Y-%m-%d')
+
+        # Call the TRM API with today's date
         response = requests.get(
-            'https://trm-colombia.vercel.app/',
+            f'https://trm-colombia.vercel.app/?date={today_str}',
             timeout=10
         )
         response.raise_for_status()
 
-        data = response.json()
-        valor = data.get('valor')  # e.g., 4200.25
-        fecha_str = data.get('fecha')  # e.g., "2026-03-15"
+        payload = response.json()
+        inner = payload.get('data', {})
+        valor = inner.get('value')
+        validity_from = inner.get('validityFrom')  # e.g. "2026-03-19T05:00:00.000Z"
 
-        if not valor or not fecha_str:
+        if not valor or not validity_from:
             return {
                 'success': False,
-                'message': 'Invalid response from TRM API'
+                'message': f'Invalid response from TRM API: {payload}'
             }
 
-        # Parse the date
-        from datetime import datetime
-        fecha = datetime.strptime(fecha_str, '%Y-%m-%d').date()
+        # Parse ISO date from validityFrom
+        fecha = datetime.fromisoformat(validity_from.replace('Z', '+00:00')).date()
 
         # Create or update TRM record
         trm, created = TRMHistory.objects.get_or_create(
@@ -88,7 +91,7 @@ def fetch_and_store_trm():
 
         return {
             'success': True,
-            'message': f"TRM {'created' if created else 'updated'} for {fecha}: {valor}",
+            'message': f"TRM {'created' if created else 'already exists'} for {fecha}: {valor}",
             'trm': trm
         }
 

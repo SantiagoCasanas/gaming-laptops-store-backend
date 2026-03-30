@@ -1,8 +1,8 @@
 from django.core.management.base import BaseCommand
 from django.contrib.auth import get_user_model
 from openpyxl import load_workbook
-from products.models import (Brand, Category, TipoProducto, CampoProducto, TipoProductoCampo,
-                             Proveedor, Producto, ProductoCategoria, ProductoCampoValor, BajoPedido,
+from products.models import (Brand, TipoProducto, CampoProducto, TipoProductoCampo,
+                             Proveedor, Producto, ProductoCampoValor, BajoPedido,
                              UnidadProducto)
 from purchases.models import OrdenCompra
 from sales.models import Cliente
@@ -13,7 +13,7 @@ User = get_user_model()
 
 
 class Command(BaseCommand):
-    help = 'Seed all GPU/Video Card data: brands, categories, supplier types, and dynamic fields'
+    help = 'Seed all GPU/Video Card data: brands, product types, supplier types, and dynamic fields'
 
     def handle(self, *args, **options):
         usuario = self._get_superuser()
@@ -25,10 +25,6 @@ class Command(BaseCommand):
         # Fase 1: Marcas
         self.stdout.write(self.style.SUCCESS('\n--- FASE 1: MARCAS ---'))
         self._seed_brands(usuario)
-
-        # Fase 2: Categorías
-        self.stdout.write(self.style.SUCCESS('\n--- FASE 2: CATEGORIAS ---'))
-        self._seed_categories(usuario)
 
         # Fase 3: Tipo de Producto + Campos Dinámicos
         self.stdout.write(self.style.SUCCESS('\n--- FASE 3: TIPO DE PRODUCTO + CAMPOS DINAMICOS ---'))
@@ -104,47 +100,6 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.ERROR(f'[!] Error creando "{nombre}": {str(e)}'))
 
         self.stdout.write(self.style.SUCCESS(f'\nResumen Fase 1: {created_count} nuevas, {existing_count} existentes, {len(brands)} total'))
-
-    def _seed_categories(self, usuario):
-        """Fase 2: Cargar categorías desde Excel."""
-        try:
-            wb = load_workbook('products/datos-precarga/graficas/archivos_de_carga/02_Fase2_Categorias.xlsx')
-            ws = wb.active
-        except FileNotFoundError:
-            self.stdout.write(self.style.ERROR('Archivo no encontrado: products/datos-precarga/graficas/archivos_de_carga/02_Fase2_Categorias.xlsx'))
-            return
-
-        categories = [(row[0].value, row[1].value) for row in ws.iter_rows(min_row=2, max_col=2) if row[0].value]
-        created_count = 0
-        existing_count = 0
-
-        for nombre, descripcion in categories:
-            nombre = str(nombre).strip() if nombre else ''
-            descripcion = str(descripcion).strip() if descripcion else ''
-
-            if not nombre:
-                self.stdout.write(self.style.WARNING('Categoria sin nombre, saltando...'))
-                continue
-
-            try:
-                category, created = Category.objects.update_or_create(
-                    name=nombre,
-                    defaults={
-                        'description': descripcion
-                    }
-                )
-
-                if created:
-                    self.stdout.write(self.style.SUCCESS(f'[+] Creado: {nombre}'))
-                    created_count += 1
-                else:
-                    self.stdout.write(self.style.WARNING(f'[-] Ya existía: {nombre}'))
-                    existing_count += 1
-
-            except Exception as e:
-                self.stdout.write(self.style.ERROR(f'[!] Error creando "{nombre}": {str(e)}'))
-
-        self.stdout.write(self.style.SUCCESS(f'\nResumen Fase 2: {created_count} nuevas, {existing_count} existentes, {len(categories)} total'))
 
     def _seed_tipo_grafica(self, usuario):
         """Fase 3: Crear TipoProducto y CampoProducto (hardcoded)."""
@@ -263,12 +218,8 @@ class Command(BaseCommand):
         # Obtener referencias
         try:
             tipo_grafica = TipoProducto.objects.get(nombre='Tarjeta de Video')
-            categoria_gpu = Category.objects.get(name='Tarjetas de Video')
         except TipoProducto.DoesNotExist:
             self.stdout.write(self.style.ERROR('[!] TipoProducto "Tarjeta de Video" no existe. Ejecutar Fase 3 primero.'))
-            return
-        except Category.DoesNotExist:
-            self.stdout.write(self.style.ERROR('[!] Category "Tarjetas de Video" no existe. Ejecutar Fase 2 primero.'))
             return
 
         # Mapeo de nombres en Excel a nombres en BD
@@ -331,12 +282,6 @@ class Command(BaseCommand):
                         'tipo_producto': tipo_grafica,
                         'usuario_ultima_modificacion': usuario
                     }
-                )
-
-                # Asociar categoría
-                ProductoCategoria.objects.get_or_create(
-                    producto=producto,
-                    categoria=categoria_gpu
                 )
 
                 # Cargar campos dinámicos

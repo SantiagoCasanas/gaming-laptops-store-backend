@@ -5,11 +5,6 @@ from .views import (
     BrandUpdateView,
     BrandActivateView,
     BrandDeactivateView,
-    CategoryListView,
-    CategoryCreateView,
-    CategoryUpdateView,
-    CategoryActivateView,
-    CategoryDeactivateView,
     TipoProductoListView,
     TipoProductoCreateView,
     TipoProductoUpdateView,
@@ -56,13 +51,6 @@ urlpatterns = [
     path('brands/update/<int:pk>/', BrandUpdateView.as_view(), name='brand_update'),
     path('brands/activate/<int:pk>/', BrandActivateView.as_view(), name='brand_activate'),
     path('brands/deactivate/<int:pk>/', BrandDeactivateView.as_view(), name='brand_deactivate'),
-
-    # Category endpoints
-    path('categories/list/', CategoryListView.as_view(), name='category_list'),
-    path('categories/create/', CategoryCreateView.as_view(), name='category_create'),
-    path('categories/update/<int:pk>/', CategoryUpdateView.as_view(), name='category_update'),
-    path('categories/activate/<int:pk>/', CategoryActivateView.as_view(), name='category_activate'),
-    path('categories/deactivate/<int:pk>/', CategoryDeactivateView.as_view(), name='category_deactivate'),
 
     # Product Type endpoints
     path('product-types/list/', TipoProductoListView.as_view(), name='tipo_producto_list'),

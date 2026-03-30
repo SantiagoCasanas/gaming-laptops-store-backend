@@ -63,11 +63,11 @@ def generate_invoice_document(invoice) -> io.BytesIO:
         '{{due_date}}': invoice.due_date.strftime('%d/%m/%Y'),
         '{{payment_method}}': PAYMENT_DISPLAY.get(invoice.payment_method, invoice.payment_method),
         '{{bill_id}}': str(invoice.bill_id),
-        '{{client_name}}': str(invoice.client_name),
-        '{{client_id}}': str(invoice.client_document),
-        '{{client_phone}}': str(invoice.client_phone),
-        '{{client_address}}': str(invoice.client_address),
-        '{{client_email}}': str(invoice.client_email),
+        '{{client_name}}': str(invoice.cliente.nombre_completo),
+        '{{client_id}}': str(invoice.cliente.cedula),
+        '{{client_phone}}': str(invoice.cliente.celular),
+        '{{client_address}}': str(invoice.cliente.direccion),
+        '{{client_email}}': str(invoice.cliente.correo),
     }
 
     for paragraph in doc.paragraphs:
