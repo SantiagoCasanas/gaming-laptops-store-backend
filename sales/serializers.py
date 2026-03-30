@@ -12,9 +12,12 @@ class ClienteSerializer(serializers.ModelSerializer):
     Serializer for Cliente model.
     Used for listing and retrieving customer information.
     """
+    ciudad_nombre = serializers.CharField(source='ciudad.nombre', read_only=True)
+    departamento_nombre = serializers.CharField(source='departamento.nombre', read_only=True)
+
     class Meta:
         model = Cliente
-        fields = ['id', 'nombre_completo', 'cedula', 'celular', 'correo', 'direccion', 'ciudad', 'departamento', 'active']
+        fields = ['id', 'nombre_completo', 'cedula', 'celular', 'correo', 'direccion', 'ciudad', 'ciudad_nombre', 'departamento', 'departamento_nombre', 'active']
 
 
 class ClienteCreateSerializer(serializers.ModelSerializer):
@@ -140,8 +143,11 @@ class SeparacionCreateSerializer(serializers.ModelSerializer):
         ]
 
     def create(self, validated_data):
-        """Create and return a new hold instance."""
+        """Create hold and mark unit as 'separado'."""
         sep = Separacion.objects.create(**validated_data)
+        unidad = sep.unidad_producto
+        unidad.estado_venta = 'separado'
+        unidad.save(update_fields=['estado_venta'])
         return sep
 
 
@@ -245,12 +251,18 @@ class VentaCreateSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def create(self, validated_data):
-        """Create Venta with associated ItemVenta records."""
+        """Create Venta with associated ItemVenta records and mark units as 'vendido'."""
         items_data = validated_data.pop('items_data')
         venta = Venta.objects.create(**validated_data)
 
         for item_data in items_data:
-            ItemVenta.objects.create(venta=venta, **item_data)
+            item = ItemVenta.objects.create(venta=venta, **item_data)
+            unidad = item.unidad_producto
+            unidad.estado_venta = 'vendido'
+            unidad.precio = item.precio
+            if unidad.estado_producto == 'en_stock':
+                unidad.estado_producto = 'por_entregar'
+            unidad.save(update_fields=['estado_venta', 'estado_producto', 'precio'])
 
         return venta
 

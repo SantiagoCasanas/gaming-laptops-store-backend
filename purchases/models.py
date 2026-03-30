@@ -113,9 +113,11 @@ class OrdenCompra(BaseModel):
         super().save(*args, **kwargs)
 
         # If unit already exists, sync estado_producto when logistic status changes
+        # Only if unit has a real serial (not auto-generated placeholder)
         if self.unidad_producto and self.estado_logistico != 'viajando':
-            self.unidad_producto.estado_producto = 'en_stock'
-            self.unidad_producto.save(update_fields=['estado_producto'])
+            if not self.unidad_producto.serial.startswith('SIN-SERIAL-'):
+                self.unidad_producto.estado_producto = 'en_stock'
+                self.unidad_producto.save(update_fields=['estado_producto'])
 
         # Create the associated unit if none exists yet
         if not self.unidad_producto:

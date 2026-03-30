@@ -981,9 +981,11 @@ class UnidadProductoUpdateSerializer(serializers.ModelSerializer):
     """
     Write serializer for updating an existing UnidadProducto.
     All fields are optional (partial updates allowed).
-    Serial, condicion, and precio are editable after creation.
+    Units with estado_venta 'vendido' or 'separado' cannot be edited.
     Sets usuario_ultima_modificacion from context['request'].
     """
+    LOCKED_STATES = ('vendido', 'separado')
+
     class Meta:
         model = UnidadProducto
         fields = ['serial', 'condicion', 'estado_venta', 'estado_producto', 'precio']
@@ -994,6 +996,28 @@ class UnidadProductoUpdateSerializer(serializers.ModelSerializer):
             'estado_producto': {'required': False},
             'precio': {'required': False},
         }
+
+    def validate(self, attrs):
+        if self.instance and self.instance.estado_venta in self.LOCKED_STATES:
+            raise serializers.ValidationError(
+                f'Esta unidad tiene estado "{self.instance.get_estado_venta_display()}". '
+                'Elimine la venta o separación asociada antes de editarla.'
+            )
+        # Prevent manually setting estado_venta to vendido/separado
+        new_estado = attrs.get('estado_venta')
+        if new_estado and new_estado in self.LOCKED_STATES:
+            raise serializers.ValidationError({
+                'estado_venta': 'Este estado solo se asigna automáticamente al registrar una venta o separación.'
+            })
+        # Serial required to move estado_producto away from 'viajando'
+        new_estado_producto = attrs.get('estado_producto')
+        if new_estado_producto and new_estado_producto != 'viajando' and self.instance:
+            serial = attrs.get('serial', self.instance.serial)
+            if serial.startswith('SIN-SERIAL-'):
+                raise serializers.ValidationError({
+                    'estado_producto': 'Debe registrar el serial antes de cambiar el estado del producto.'
+                })
+        return attrs
 
     def validate_precio(self, value):
         """Ensure price is a positive number when provided."""

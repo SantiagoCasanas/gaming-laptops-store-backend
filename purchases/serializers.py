@@ -81,6 +81,16 @@ class OrdenCompraUpdateSerializer(serializers.ModelSerializer):
             'estado_logistico'
         ]
 
+    def validate(self, attrs):
+        new_estado = attrs.get('estado_logistico')
+        if new_estado and new_estado != 'viajando' and self.instance and self.instance.unidad_producto:
+            serial = self.instance.unidad_producto.serial
+            if serial.startswith('SIN-SERIAL-'):
+                raise serializers.ValidationError({
+                    'estado_logistico': 'Debe registrar el serial de la unidad antes de cambiar el estado logístico.'
+                })
+        return attrs
+
     def update(self, instance, validated_data):
         """Update and return the purchase order instance."""
         instance.proveedor = validated_data.get('proveedor', instance.proveedor)

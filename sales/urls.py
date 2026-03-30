@@ -23,6 +23,7 @@ from .views import (
     VentaListView,
     VentaCreateView,
     VentaDetailView,
+    VentaDeactivateView,
     InvoiceListView,
     InvoiceCreateView,
     InvoiceDetailView,
@@ -68,6 +69,7 @@ urlpatterns = [
     path('ventas/list/', VentaListView.as_view(), name='venta_list'),
     path('ventas/create/', VentaCreateView.as_view(), name='venta_create'),
     path('ventas/detail/<int:pk>/', VentaDetailView.as_view(), name='venta_detail'),
+    path('ventas/deactivate/<int:pk>/', VentaDeactivateView.as_view(), name='venta_deactivate'),
 
     # Invoice endpoints
     path('invoices/list/', InvoiceListView.as_view(), name='invoice_list'),

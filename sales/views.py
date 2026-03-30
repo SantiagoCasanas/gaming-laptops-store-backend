@@ -344,7 +344,7 @@ class SeparacionActivateView(APIView):
 class SeparacionDeactivateView(APIView):
     """
     View to deactivate a hold/separation.
-    POST: Sets active=False for the specified hold.
+    POST: Sets active=False and restores unit estado_venta to 'sin_vender'.
     """
     permission_classes = [IsAuthenticated]
 
@@ -358,6 +358,11 @@ class SeparacionDeactivateView(APIView):
 
         sep.active = False
         sep.save()
+
+        # Restore unit estado_venta
+        unidad = sep.unidad_producto
+        unidad.estado_venta = 'sin_vender'
+        unidad.save(update_fields=['estado_venta'])
 
         return Response({
             'message': 'Hold deactivated successfully',
@@ -422,6 +427,35 @@ class VentaDetailView(RetrieveAPIView):
     serializer_class = VentaSerializer
     permission_classes = [IsAuthenticated]
     lookup_field = 'pk'
+
+
+class VentaDeactivateView(APIView):
+    """
+    Deactivate a sale and restore unit estado_venta to 'sin_vender'.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        venta = get_object_or_404(Venta, pk=pk)
+
+        if not venta.active:
+            return Response({
+                'message': 'Sale is already inactive'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        venta.active = False
+        venta.save()
+
+        # Restore estado_venta for all units in this sale
+        for item in venta.items.select_related('unidad_producto').all():
+            unidad = item.unidad_producto
+            unidad.estado_venta = 'sin_vender'
+            unidad.save(update_fields=['estado_venta'])
+
+        return Response({
+            'message': 'Sale deactivated successfully',
+            'venta': VentaSerializer(venta).data
+        }, status=status.HTTP_200_OK)
 
 
 class InvoiceListView(APIView):
