@@ -3,7 +3,9 @@ from rest_framework.response import Response
 from rest_framework.generics import ListAPIView, CreateAPIView, UpdateAPIView, RetrieveAPIView
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
+from django.db import transaction
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from .models import Brand, TipoProducto, CampoProducto, Proveedor, Producto, Descuento, UnidadProducto, BajoPedido
 from .serializers import (
     BrandSerializer,
@@ -32,6 +34,7 @@ from .serializers import (
     UnidadProductoSerializer,
     UnidadProductoCreateSerializer,
     UnidadProductoUpdateSerializer,
+    UnidadReparacionSerializer,
 )
 
 
@@ -1002,7 +1005,8 @@ class UnidadProductoListView(ListAPIView):
 
     def get_queryset(self):
         queryset = UnidadProducto.objects.select_related(
-            'producto', 'producto__marca'
+            'producto', 'producto__marca', 'producto__tipo_producto',
+            'cliente_garantia', 'cliente_metodo_aliado',
         ).all()
         producto_id = self.request.query_params.get('producto_id')
         if producto_id:
@@ -1023,7 +1027,8 @@ class UnidadProductoDetailView(RetrieveAPIView):
 
     def get_queryset(self):
         return UnidadProducto.objects.select_related(
-            'producto', 'producto__marca'
+            'producto', 'producto__marca', 'producto__tipo_producto',
+            'cliente_garantia', 'cliente_metodo_aliado',
         ).all()
 
 
@@ -1140,4 +1145,150 @@ class UnidadProductoDeactivateView(APIView):
         return Response({
             'message': 'Product unit deactivated successfully',
             'unidad': UnidadProductoSerializer(unidad).data,
+        }, status=status.HTTP_200_OK)
+
+
+# ---------------------------------------------------------------------------
+# Repair pipeline views
+# ---------------------------------------------------------------------------
+
+REPAIR_STATES = ('por_reparar', 'en_reparacion')
+
+
+def _derive_origen(unidad):
+    """Return ('stock'|'venta'|'separacion', related_object_or_None)."""
+    item = unidad.items_venta.filter(active=True).order_by('-id').first()
+    if item:
+        return 'venta', item
+    sep = unidad.separaciones.filter(active=True).exclude(estado='cancelada').order_by('-id').first()
+    if sep:
+        return 'separacion', sep
+    return 'stock', None
+
+
+class ReparacionesListView(ListAPIView):
+    """
+    GET /products/reparaciones/list/
+    Lists units currently in the repair pipeline (por_reparar | en_reparacion).
+    """
+    serializer_class = UnidadReparacionSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return (
+            UnidadProducto.objects
+            .filter(estado_producto__in=REPAIR_STATES, active=True)
+            .select_related('producto', 'producto__marca')
+            .prefetch_related('items_venta__venta__cliente', 'separaciones__cliente')
+            .order_by('-fecha_reporte_dano', '-id')
+        )
+
+
+class ReportarDanoView(APIView):
+    """
+    POST /products/unidades/<pk>/reportar-dano/
+    Body: { "descripcion_dano": "..." }
+    Marks the unit as damaged and places it in the repair pipeline. If the unit
+    belongs to an active sale, the parent Venta is sent back to 'por_entregar'.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        unidad = get_object_or_404(UnidadProducto, pk=pk)
+
+        if unidad.estado_producto in REPAIR_STATES:
+            return Response(
+                {'error': 'Esta unidad ya está en el flujo de reparación.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        origen, related = _derive_origen(unidad)
+
+        unidad.estado_venta = 'danado'
+        unidad.estado_producto = 'por_reparar'
+        unidad.descripcion_dano = request.data.get('descripcion_dano', '') or ''
+        unidad.fecha_reporte_dano = timezone.now()
+        unidad.usuario_ultima_modificacion = request.user
+        unidad.save()
+
+        if origen == 'venta' and related is not None:
+            venta = related.venta
+            if venta.estado_entrega != 'por_entregar':
+                venta.estado_entrega = 'por_entregar'
+                venta.fecha_entrega = None
+                venta.usuario_ultima_modificacion = request.user
+                venta.save()
+
+        return Response({
+            'message': 'Unidad reportada como dañada',
+            'unidad': UnidadReparacionSerializer(unidad).data,
+        }, status=status.HTTP_200_OK)
+
+
+class IniciarReparacionView(APIView):
+    """
+    POST /products/unidades/<pk>/iniciar-reparacion/
+    Moves the unit from por_reparar to en_reparacion.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        unidad = get_object_or_404(UnidadProducto, pk=pk)
+
+        if unidad.estado_producto != 'por_reparar':
+            return Response(
+                {'error': 'Solo se puede iniciar la reparación de unidades en estado "por_reparar".'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        unidad.estado_producto = 'en_reparacion'
+        unidad.usuario_ultima_modificacion = request.user
+        unidad.save()
+
+        return Response({
+            'message': 'Reparación iniciada',
+            'unidad': UnidadReparacionSerializer(unidad).data,
+        }, status=status.HTTP_200_OK)
+
+
+class CompletarReparacionView(APIView):
+    """
+    POST /products/unidades/<pk>/completar-reparacion/
+    Restores unit state based on the derived origin (stock/venta/separacion).
+    """
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        unidad = get_object_or_404(UnidadProducto, pk=pk)
+
+        if unidad.estado_producto not in REPAIR_STATES:
+            return Response(
+                {'error': 'Solo se pueden completar unidades en "por_reparar" o "en_reparacion".'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        origen, _ = _derive_origen(unidad)
+
+        if origen == 'venta':
+            unidad.estado_venta = 'vendido'
+            unidad.estado_producto = 'por_entregar'
+        elif origen == 'separacion':
+            unidad.estado_venta = 'separado'
+            unidad.estado_producto = 'en_stock'
+        else:
+            unidad.estado_venta = 'sin_vender'
+            unidad.estado_producto = 'en_stock'
+
+        unidad.descripcion_dano = ''
+        unidad.fecha_reporte_dano = None
+        unidad.usuario_ultima_modificacion = request.user
+        unidad.save()
+
+        return Response({
+            'message': 'Reparación completada',
+            'origen': origen,
+            'unidad': UnidadReparacionSerializer(unidad).data,
         }, status=status.HTTP_200_OK)

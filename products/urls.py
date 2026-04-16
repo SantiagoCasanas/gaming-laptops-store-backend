@@ -42,6 +42,10 @@ from .views import (
     UnidadProductoUpdateView,
     UnidadProductoActivateView,
     UnidadProductoDeactivateView,
+    ReparacionesListView,
+    ReportarDanoView,
+    IniciarReparacionView,
+    CompletarReparacionView,
 )
 
 urlpatterns = [
@@ -102,4 +106,10 @@ urlpatterns = [
     path('unidades/activate/<int:pk>/', UnidadProductoActivateView.as_view(), name='unidad_activate'),
     path('unidades/deactivate/<int:pk>/', UnidadProductoDeactivateView.as_view(), name='unidad_deactivate'),
     path('unidades/<int:pk>/detail/', UnidadProductoDetailView.as_view(), name='unidad_detail'),
+
+    # Repair pipeline endpoints
+    path('reparaciones/list/', ReparacionesListView.as_view(), name='reparacion_list'),
+    path('unidades/<int:pk>/reportar-dano/', ReportarDanoView.as_view(), name='unidad_reportar_dano'),
+    path('unidades/<int:pk>/iniciar-reparacion/', IniciarReparacionView.as_view(), name='unidad_iniciar_reparacion'),
+    path('unidades/<int:pk>/completar-reparacion/', CompletarReparacionView.as_view(), name='unidad_completar_reparacion'),
 ]

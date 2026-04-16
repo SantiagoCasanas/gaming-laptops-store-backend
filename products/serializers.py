@@ -924,18 +924,29 @@ class UnidadProductoSerializer(serializers.ModelSerializer):
     """
     producto_nombre = serializers.CharField(source='producto.nombre', read_only=True)
     producto_marca = serializers.CharField(source='producto.marca.name', read_only=True)
+    tipo_producto_nombre = serializers.CharField(source='producto.tipo_producto.nombre', read_only=True)
     condicion_display = serializers.CharField(source='get_condicion_display', read_only=True)
     estado_venta_display = serializers.CharField(source='get_estado_venta_display', read_only=True)
     estado_producto_display = serializers.CharField(source='get_estado_producto_display', read_only=True)
 
+    cliente_garantia_nombre = serializers.CharField(
+        source='cliente_garantia.nombre_completo', read_only=True, default=None
+    )
+    cliente_metodo_aliado_nombre = serializers.CharField(
+        source='cliente_metodo_aliado.nombre_completo', read_only=True, default=None
+    )
+
     class Meta:
         model = UnidadProducto
         fields = [
-            'id', 'producto', 'producto_nombre', 'producto_marca',
+            'id', 'producto', 'producto_nombre', 'producto_marca', 'tipo_producto_nombre',
             'serial', 'condicion', 'condicion_display',
             'estado_venta', 'estado_venta_display',
             'estado_producto', 'estado_producto_display',
             'precio', 'active',
+            'cliente_garantia', 'cliente_garantia_nombre',
+            'cliente_metodo_aliado', 'cliente_metodo_aliado_nombre',
+            'ciudad_envio_metodo_aliado',
         ]
 
 
@@ -988,13 +999,20 @@ class UnidadProductoUpdateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = UnidadProducto
-        fields = ['serial', 'condicion', 'estado_venta', 'estado_producto', 'precio']
+        fields = [
+            'serial', 'condicion', 'estado_venta', 'estado_producto', 'precio',
+            'cliente_garantia',
+            'cliente_metodo_aliado', 'ciudad_envio_metodo_aliado',
+        ]
         extra_kwargs = {
             'serial': {'required': False},
             'condicion': {'required': False},
             'estado_venta': {'required': False},
             'estado_producto': {'required': False},
             'precio': {'required': False},
+            'cliente_garantia': {'required': False},
+            'cliente_metodo_aliado': {'required': False},
+            'ciudad_envio_metodo_aliado': {'required': False},
         }
 
     def validate(self, attrs):
@@ -1028,8 +1046,80 @@ class UnidadProductoUpdateSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         """Update and return the UnidadProducto instance."""
         request = self.context['request']
+        old_estado_producto = instance.estado_producto
+
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.usuario_ultima_modificacion = request.user
         instance.save()
+
+        # Sync OrdenCompra.estado_logistico when unit transitions viajando → en_stock
+        if old_estado_producto == 'viajando' and instance.estado_producto == 'en_stock':
+            from purchases.models import OrdenCompra
+            try:
+                orden = OrdenCompra.objects.get(unidad_producto=instance)
+                orden.estado_logistico = 'en_oficina'
+                orden.save(update_fields=['estado_logistico'])
+            except OrdenCompra.DoesNotExist:
+                pass
+
         return instance
+
+
+class UnidadReparacionSerializer(serializers.ModelSerializer):
+    """
+    Read serializer for the repair listing. Exposes unit info plus a derived
+    `origen` field (stock/venta/separacion) computed from the existing
+    ItemVenta / Separacion relations — no new storage required.
+    """
+    producto_nombre = serializers.CharField(source='producto.nombre', read_only=True)
+    producto_marca = serializers.CharField(source='producto.marca.name', read_only=True)
+    estado_venta_display = serializers.CharField(source='get_estado_venta_display', read_only=True)
+    estado_producto_display = serializers.CharField(source='get_estado_producto_display', read_only=True)
+    origen = serializers.SerializerMethodField()
+    venta_id = serializers.SerializerMethodField()
+    separacion_id = serializers.SerializerMethodField()
+    cliente_nombre = serializers.SerializerMethodField()
+
+    class Meta:
+        model = UnidadProducto
+        fields = [
+            'id', 'serial', 'condicion',
+            'producto_nombre', 'producto_marca',
+            'estado_venta', 'estado_venta_display',
+            'estado_producto', 'estado_producto_display',
+            'descripcion_dano', 'fecha_reporte_dano',
+            'origen', 'venta_id', 'separacion_id', 'cliente_nombre',
+        ]
+
+    def _active_item_venta(self, obj):
+        return obj.items_venta.filter(active=True).order_by('-id').first()
+
+    def _active_separacion(self, obj):
+        return obj.separaciones.filter(active=True).exclude(
+            estado='cancelada'
+        ).order_by('-id').first()
+
+    def get_origen(self, obj):
+        if self._active_item_venta(obj):
+            return 'venta'
+        if self._active_separacion(obj):
+            return 'separacion'
+        return 'stock'
+
+    def get_venta_id(self, obj):
+        item = self._active_item_venta(obj)
+        return item.venta_id if item else None
+
+    def get_separacion_id(self, obj):
+        sep = self._active_separacion(obj)
+        return sep.id if sep else None
+
+    def get_cliente_nombre(self, obj):
+        item = self._active_item_venta(obj)
+        if item and item.venta and item.venta.cliente:
+            return item.venta.cliente.nombre_completo
+        sep = self._active_separacion(obj)
+        if sep and sep.cliente:
+            return sep.cliente.nombre_completo
+        return None

@@ -332,22 +332,22 @@ class UnidadProducto(BaseModel):
         USADO = 'usado', 'Usado'
 
     class EstadoVentaChoices(models.TextChoices):
-        SIN_VENDER = 'sin_vender', 'Not Sold'
-        SEPARADO = 'separado', 'On Hold'
-        VENDIDO = 'vendido', 'Sold'
-        POR_ENCARGO = 'por_encargo', 'On Order'
-        ENTREGADO_GARANTIA = 'entregado_garantia', 'Warranty Delivery'
-        DANADO = 'danado', 'Damaged'
-        SOLICITUD_METODO_ALIADO = 'solicitud_metodo_aliado', 'Pending Trade-in'
+        SIN_VENDER = 'sin_vender', 'Sin Vender'
+        SEPARADO = 'separado', 'Separado'
+        VENDIDO = 'vendido', 'Vendido'
+        POR_ENCARGO = 'por_encargo', 'Por Encargo'
+        ENTREGADO_GARANTIA = 'entregado_garantia', 'Entregado por Garantía'
+        DANADO = 'danado', 'Dañado'
+        SOLICITUD_METODO_ALIADO = 'solicitud_metodo_aliado', 'Solicitud Método Aliado'
 
     class EstadoProductoChoices(models.TextChoices):
-        EN_STOCK = 'en_stock', 'In Stock'
-        VIAJANDO = 'viajando', 'In Transit'
-        POR_COMPRAR = 'por_comprar', 'Pending Purchase'
-        POR_ENTREGAR = 'por_entregar', 'Pending Delivery'
-        ENTREGADO = 'entregado', 'Delivered'
-        POR_REPARAR = 'por_reparar', 'Pending Repair'
-        EN_REPARACION = 'en_reparacion', 'In Repair'
+        EN_STOCK = 'en_stock', 'En Oficina'
+        VIAJANDO = 'viajando', 'Viajando'
+        POR_COMPRAR = 'por_comprar', 'Por Comprar'
+        POR_ENTREGAR = 'por_entregar', 'Por Entregar'
+        ENTREGADO = 'entregado', 'Entregado'
+        POR_REPARAR = 'por_reparar', 'Por Reparar'
+        EN_REPARACION = 'en_reparacion', 'En Reparación'
 
     producto = models.ForeignKey(
         Producto,
@@ -388,6 +388,40 @@ class UnidadProducto(BaseModel):
         null=True,
         related_name='unidades_modificadas',
         help_text="Last user who modified this unit"
+    )
+    # Garantía field — populated when estado_venta = entregado_garantia
+    cliente_garantia = models.ForeignKey(
+        'sales.Cliente',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='unidades_garantia',
+        help_text="Client associated with warranty delivery"
+    )
+    # Método aliado fields — populated when estado_venta = solicitud_metodo_aliado
+    cliente_metodo_aliado = models.ForeignKey(
+        'sales.Cliente',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='unidades_metodo_aliado',
+        help_text="Client associated with método aliado request"
+    )
+    ciudad_envio_metodo_aliado = models.CharField(
+        max_length=200,
+        blank=True,
+        default='',
+        help_text="Destination city for método aliado shipment (free text)"
+    )
+    descripcion_dano = models.TextField(
+        blank=True,
+        default='',
+        help_text="Description of the reported damage (if applicable)"
+    )
+    fecha_reporte_dano = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp when the damage was reported"
     )
 
     class Meta:

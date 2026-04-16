@@ -57,7 +57,6 @@ def generate_invoice_document(invoice) -> io.BytesIO:
 
     placeholders = {
         '{{concepto}}': CONCEPTO_DISPLAY.get(invoice.concepto, invoice.concepto),
-        '{{item}}': ITEM_DISPLAY.get(invoice.item, invoice.item),
         '{{serial_item}}': str(invoice.serial_item),
         '{{total_amount}}': _format_currency(invoice.total_amount),
         '{{due_date}}': invoice.due_date.strftime('%d/%m/%Y'),

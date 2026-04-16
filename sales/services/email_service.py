@@ -1,3 +1,4 @@
+import base64
 import logging
 import resend
 from django.conf import settings
@@ -133,8 +134,7 @@ def send_invoice_email(invoice, file_bytes: bytes) -> bool:
             "attachments": [
                 {
                     "filename": f"factura_{invoice.bill_id}.docx",
-                    # resend SDK v2: content must be list[int], not base64 string
-                    "content": list(file_bytes),
+                    "content": base64.b64encode(file_bytes).decode("ascii"),
                     "content_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 }
             ],

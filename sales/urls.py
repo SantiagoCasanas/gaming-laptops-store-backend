@@ -22,6 +22,8 @@ from .views import (
     SeparacionDeactivateView,
     VentaListView,
     VentaCreateView,
+    VentaUpdateView,
+    VentaDeleteView,
     VentaDetailView,
     VentaDeactivateView,
     InvoiceListView,
@@ -68,6 +70,8 @@ urlpatterns = [
     # Venta endpoints
     path('ventas/list/', VentaListView.as_view(), name='venta_list'),
     path('ventas/create/', VentaCreateView.as_view(), name='venta_create'),
+    path('ventas/update/<int:pk>/', VentaUpdateView.as_view(), name='venta_update'),
+    path('ventas/delete/<int:pk>/', VentaDeleteView.as_view(), name='venta_delete'),
     path('ventas/detail/<int:pk>/', VentaDetailView.as_view(), name='venta_detail'),
     path('ventas/deactivate/<int:pk>/', VentaDeactivateView.as_view(), name='venta_deactivate'),
 

@@ -13,7 +13,7 @@ from .serializers import (
     ClienteUpdateSerializer, SolicitudBajoPedidoSerializer, SolicitudBajoPedidoCreateSerializer,
     SolicitudBajoPedidoUpdateSerializer, SeparacionSerializer, SeparacionCreateSerializer,
     SeparacionUpdateSerializer, DepartamentoSerializer, CiudadSerializer, CiudadByCiudadDepartamentoSerializer,
-    VentaSerializer, VentaCreateSerializer, ItemVentaSerializer, ItemVentaCreateSerializer,
+    VentaSerializer, VentaCreateSerializer, VentaUpdateSerializer, ItemVentaSerializer, ItemVentaCreateSerializer,
 )
 from .services.document_service import generate_invoice_document
 from .services.storage_service import save_invoice, get_invoice_bytes
@@ -259,7 +259,7 @@ class SeparacionListView(ListAPIView):
     View to list all holds/separations.
     GET: Returns a list of all holds with their information.
     """
-    queryset = Separacion.objects.all()
+    queryset = Separacion.objects.select_related('unidad_producto__producto', 'cliente').all()
     serializer_class = SeparacionSerializer
     permission_classes = [IsAuthenticated]
 
@@ -429,6 +429,39 @@ class VentaDetailView(RetrieveAPIView):
     lookup_field = 'pk'
 
 
+class VentaUpdateView(UpdateAPIView):
+    """Update a sale's cliente and notas."""
+    queryset = Venta.objects.all()
+    serializer_class = VentaUpdateSerializer
+    permission_classes = [IsAuthenticated]
+    lookup_field = 'pk'
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        return Response({
+            'message': 'Sale updated successfully',
+            'venta': VentaSerializer(instance).data
+        }, status=status.HTTP_200_OK)
+
+
+class VentaDeleteView(APIView):
+    """Hard delete a sale and restore unit estado_venta to 'sin_vender'."""
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, pk):
+        venta = get_object_or_404(Venta, pk=pk)
+        for item in venta.items.select_related('unidad_producto').all():
+            unidad = item.unidad_producto
+            unidad.estado_venta = 'sin_vender'
+            unidad.save(update_fields=['estado_venta'])
+        venta.delete()
+        return Response({'message': 'Sale deleted successfully'}, status=status.HTTP_204_NO_CONTENT)
+
+
 class VentaDeactivateView(APIView):
     """
     Deactivate a sale and restore unit estado_venta to 'sin_vender'.
@@ -476,6 +509,23 @@ class InvoiceCreateView(APIView):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         validated = serializer.validated_data
+
+        # Auto-infer item (tipo_producto) from serial_item if not provided
+        if not validated.get('item'):
+            serial_raw = validated.get('serial_item', '').strip()
+            first_serial = serial_raw.split(',')[0].strip()
+            if first_serial:
+                try:
+                    from products.models import UnidadProducto
+                    unidad = UnidadProducto.objects.select_related(
+                        'producto__tipo_producto'
+                    ).get(serial=first_serial)
+                    validated['item'] = unidad.producto.tipo_producto.nombre
+                except UnidadProducto.DoesNotExist:
+                    return Response(
+                        {'serial_item': 'No se encontró una unidad con el serial proporcionado.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
 
         # Pre-compute bill_id to check for duplicates before saving
         date_str = validated['due_date'].strftime('%Y%m%d')

@@ -313,12 +313,6 @@ class Invoice(BaseModel):
         ('venta', 'Venta'),
         ('separacion', 'Separación'),
     ]
-    ITEM_CHOICES = [
-        ('laptop', 'Laptop'),
-        ('tarjeta_grafica', 'Tarjeta Gráfica'),
-        ('hardware', 'Hardware'),
-        ('pc_mesa', 'PC de Mesa'),
-    ]
     PAYMENT_METHOD_CHOICES = [
         ('efectivo', 'Efectivo'),
         ('tarjeta', 'Tarjeta'),
@@ -358,7 +352,7 @@ class Invoice(BaseModel):
 
     # Sale data
     concepto = models.CharField(max_length=20, choices=CONCEPTO_CHOICES)
-    item = models.CharField(max_length=30, choices=ITEM_CHOICES)
+    item = models.CharField(max_length=100, blank=True)
     serial_item = models.CharField(max_length=100)
     total_amount = models.DecimalField(max_digits=12, decimal_places=2)
     payment_method = models.CharField(max_length=30, choices=PAYMENT_METHOD_CHOICES)

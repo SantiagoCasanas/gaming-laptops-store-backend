@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from django.db import transaction
 from .models import Invoice, Cliente, SolicitudBajoPedido, Separacion, Venta, ItemVenta, Departamento, Ciudad
+from products.models import UnidadProducto
 
 
 # ---------------------------------------------------------------------------
@@ -65,16 +66,27 @@ class SolicitudBajoPedidoSerializer(serializers.ModelSerializer):
     Used for listing and retrieving back order information.
     """
     bajo_pedido_str = serializers.CharField(source='bajo_pedido.__str__', read_only=True)
+    bajo_pedido_producto_id = serializers.IntegerField(source='bajo_pedido.producto.id', read_only=True)
+    bajo_pedido_producto_nombre = serializers.CharField(source='bajo_pedido.producto.nombre', read_only=True)
+    bajo_pedido_condicion = serializers.CharField(source='bajo_pedido.condicion', read_only=True)
     cliente_nombre = serializers.CharField(source='cliente.nombre_completo', read_only=True)
     estado_display = serializers.CharField(source='get_estado_display', read_only=True)
+    orden_compra_estado = serializers.SerializerMethodField()
 
     class Meta:
         model = SolicitudBajoPedido
         fields = [
-            'id', 'bajo_pedido', 'bajo_pedido_str', 'cliente', 'cliente_nombre',
+            'id', 'bajo_pedido', 'bajo_pedido_str', 'bajo_pedido_producto_id',
+            'bajo_pedido_producto_nombre', 'bajo_pedido_condicion',
+            'cliente', 'cliente_nombre',
             'valor_abono', 'fecha_solicitud', 'fecha_maxima_compra', 'orden_compra',
-            'estado', 'estado_display', 'active'
+            'orden_compra_estado', 'estado', 'estado_display', 'active'
         ]
+
+    def get_orden_compra_estado(self, obj):
+        if obj.orden_compra:
+            return obj.orden_compra.estado_logistico
+        return None
 
 
 class SolicitudBajoPedidoCreateSerializer(serializers.ModelSerializer):
@@ -100,7 +112,7 @@ class SolicitudBajoPedidoUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = SolicitudBajoPedido
         fields = [
-            'valor_abono', 'fecha_maxima_compra', 'estado'
+            'valor_abono', 'fecha_maxima_compra', 'estado', 'orden_compra'
         ]
 
     def update(self, instance, validated_data):
@@ -108,6 +120,7 @@ class SolicitudBajoPedidoUpdateSerializer(serializers.ModelSerializer):
         instance.valor_abono = validated_data.get('valor_abono', instance.valor_abono)
         instance.fecha_maxima_compra = validated_data.get('fecha_maxima_compra', instance.fecha_maxima_compra)
         instance.estado = validated_data.get('estado', instance.estado)
+        instance.orden_compra = validated_data.get('orden_compra', instance.orden_compra)
         instance.save()
         return instance
 
@@ -122,12 +135,18 @@ class SeparacionSerializer(serializers.ModelSerializer):
     Used for listing and retrieving hold/separation information.
     """
     unidad_serial = serializers.CharField(source='unidad_producto.serial', read_only=True)
+    unidad_estado_venta = serializers.CharField(source='unidad_producto.estado_venta', read_only=True)
+    unidad_estado_producto = serializers.CharField(source='unidad_producto.estado_producto', read_only=True)
     cliente_nombre = serializers.CharField(source='cliente.nombre_completo', read_only=True)
+    producto_nombre = serializers.CharField(source='unidad_producto.producto.nombre', read_only=True)
+    unidad_precio = serializers.DecimalField(source='unidad_producto.precio', max_digits=14, decimal_places=2, read_only=True)
 
     class Meta:
         model = Separacion
         fields = [
-            'id', 'unidad_producto', 'unidad_serial', 'cliente', 'cliente_nombre',
+            'id', 'unidad_producto', 'unidad_serial', 'unidad_estado_venta', 'unidad_estado_producto',
+            'producto_nombre', 'unidad_precio',
+            'cliente', 'cliente_nombre',
             'valor_abono', 'fecha_separacion', 'fecha_maxima_compra', 'estado', 'active'
         ]
 
@@ -163,10 +182,18 @@ class SeparacionUpdateSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         """Update and return the hold instance."""
+        old_estado = instance.estado
         instance.valor_abono = validated_data.get('valor_abono', instance.valor_abono)
         instance.fecha_maxima_compra = validated_data.get('fecha_maxima_compra', instance.fecha_maxima_compra)
         instance.estado = validated_data.get('estado', instance.estado)
         instance.save()
+
+        # When canceled, restore unit to sin_vender
+        if old_estado != 'cancelada' and instance.estado == 'cancelada':
+            unidad = instance.unidad_producto
+            unidad.estado_venta = 'sin_vender'
+            unidad.save(update_fields=['estado_venta'])
+
         return instance
 
 
@@ -205,10 +232,16 @@ class ItemVentaSerializer(serializers.ModelSerializer):
     """Serializer for ItemVenta model."""
     unidad_serial = serializers.CharField(source='unidad_producto.serial', read_only=True)
     producto_nombre = serializers.CharField(source='unidad_producto.variante.producto.nombre', read_only=True)
+    unidad_estado_producto = serializers.CharField(source='unidad_producto.estado_producto', read_only=True)
+    unidad_estado_venta = serializers.CharField(source='unidad_producto.estado_venta', read_only=True)
 
     class Meta:
         model = ItemVenta
-        fields = ['id', 'venta', 'unidad_producto', 'unidad_serial', 'producto_nombre', 'precio', 'active']
+        fields = [
+            'id', 'venta', 'unidad_producto', 'unidad_serial', 'producto_nombre',
+            'unidad_estado_producto', 'unidad_estado_venta',
+            'precio', 'active',
+        ]
 
 
 class ItemVentaCreateSerializer(serializers.ModelSerializer):
@@ -230,7 +263,7 @@ class VentaSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Venta
-        fields = ['id', 'cliente', 'cliente_nombre', 'fecha', 'notas', 'separacion', 'items', 'total', 'active']
+        fields = ['id', 'cliente', 'cliente_nombre', 'fecha', 'notas', 'separacion', 'items', 'total', 'estado_entrega', 'active']
 
     def get_total(self, obj):
         """Calculate total sale amount."""
@@ -247,7 +280,7 @@ class VentaCreateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Venta
-        fields = ['cliente', 'notas', 'separacion', 'items_data']
+        fields = ['cliente', 'notas', 'separacion', 'items_data', 'estado_entrega']
 
     @transaction.atomic
     def create(self, validated_data):
@@ -256,15 +289,36 @@ class VentaCreateSerializer(serializers.ModelSerializer):
         venta = Venta.objects.create(**validated_data)
 
         for item_data in items_data:
-            item = ItemVenta.objects.create(venta=venta, **item_data)
-            unidad = item.unidad_producto
+            unidad = UnidadProducto.objects.get(pk=int(item_data['unidad_producto']))
+            precio = item_data['precio']
+            ItemVenta.objects.create(venta=venta, unidad_producto=unidad, precio=precio)
             unidad.estado_venta = 'vendido'
-            unidad.precio = item.precio
-            if unidad.estado_producto == 'en_stock':
-                unidad.estado_producto = 'por_entregar'
-            unidad.save(update_fields=['estado_venta', 'estado_producto', 'precio'])
+            unidad.precio = precio
+            unidad.save(update_fields=['estado_venta', 'precio'])
 
         return venta
+
+
+class VentaUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for updating Venta — cliente, notas, and estado_entrega are editable."""
+    class Meta:
+        model = Venta
+        fields = ['cliente', 'notas', 'estado_entrega']
+
+    def update(self, instance, validated_data):
+        old_estado = instance.estado_entrega
+        instance.cliente = validated_data.get('cliente', instance.cliente)
+        instance.notas = validated_data.get('notas', instance.notas)
+        instance.estado_entrega = validated_data.get('estado_entrega', instance.estado_entrega)
+        instance.save()
+
+        # Cascade to units when sale is marked as delivered
+        if old_estado != 'entregado' and instance.estado_entrega == 'entregado':
+            for item in instance.items.select_related('unidad_producto').all():
+                item.unidad_producto.estado_producto = 'entregado'
+                item.unidad_producto.save(update_fields=['estado_producto'])
+
+        return instance
 
 
 # ---------------------------------------------------------------------------
@@ -296,10 +350,8 @@ class InvoiceSerializer(serializers.ModelSerializer):
             'file_path',
             'email_sent',
             'active',
-            'created_at',
-            'updated_at',
         ]
-        read_only_fields = ['id', 'bill_id', 'file_path', 'email_sent', 'active', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'bill_id', 'file_path', 'email_sent', 'active']
 
     def validate(self, attrs):
         # Validate that venta and separacion are not both provided
@@ -308,7 +360,7 @@ class InvoiceSerializer(serializers.ModelSerializer):
                 "An invoice cannot be linked to both a venta and a separacion."
             )
         # Required fields validation
-        required_fields = ['cliente', 'concepto', 'item', 'serial_item', 'total_amount', 'payment_method', 'due_date']
+        required_fields = ['cliente', 'concepto', 'serial_item', 'total_amount', 'payment_method', 'due_date']
         errors = {}
         for field in required_fields:
             value = attrs.get(field)

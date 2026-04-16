@@ -86,7 +86,7 @@ class OrdenCompra(BaseModel):
         null=False,
         default=0,
         editable=False,
-        help_text="Auto-calculated as 2% of costo_compra"
+        help_text="Calculated as porcentaje_impuesto% of costo_compra (set via serializer)"
     )
     usuario_ultima_modificacion = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -107,8 +107,9 @@ class OrdenCompra(BaseModel):
         from django.utils.timezone import now
         from core.services.trm_service import get_trm_for_date
 
-        # Auto-calculate import tax as 2% of purchase cost
-        self.impuesto_importacion = self.costo_compra * Decimal('0.02')
+        # Use percentage provided by serializer via _pct_impuesto; default 2%
+        pct = getattr(self, '_pct_impuesto', Decimal('2'))
+        self.impuesto_importacion = self.costo_compra * (pct / Decimal('100'))
 
         super().save(*args, **kwargs)
 
@@ -134,7 +135,7 @@ class OrdenCompra(BaseModel):
             # Auto-calculate unit price: round((costo_total * 1.2 * TRM - 90000) / 100000) * 100000 + 90000
             trm = get_trm_for_date(now().date())
             costo_importacion = self.costo_importacion or Decimal('0')
-            impuesto = self.costo_compra * Decimal('0.02')
+            impuesto = self.costo_compra * (pct / Decimal('100'))
             total_usd = self.costo_compra + costo_importacion + impuesto
             raw = total_usd * Decimal('1.2') * trm.valor_cop
             unit_price = (round((raw - Decimal('90000')) / Decimal('100000'))) * Decimal('100000') + Decimal('90000')

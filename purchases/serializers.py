@@ -1,3 +1,4 @@
+from decimal import Decimal
 from rest_framework import serializers
 from .models import OrdenCompra
 from products.models import UnidadProducto, Proveedor, BajoPedido, Producto
@@ -29,13 +30,17 @@ class OrdenCompraSerializer(serializers.ModelSerializer):
 class OrdenCompraCreateSerializer(serializers.ModelSerializer):
     """
     Serializer for creating a new purchase order.
-    Automatically creates a UnidadProducto when the order is created.
-    precio_venta is write-only: if provided it overrides the auto-calculated unit price;
-    if omitted the unit price is calculated from costs and TRM.
+    porcentaje_impuesto is write-only and transient: not stored in DB, used to calculate
+    impuesto_importacion via OrdenCompra.save() through the _pct_impuesto instance attribute.
+    precio_venta is write-only: if provided it overrides the auto-calculated unit price.
     """
     precio_venta = serializers.DecimalField(
         max_digits=14, decimal_places=2,
         write_only=True, required=False, allow_null=True,
+    )
+    porcentaje_impuesto = serializers.DecimalField(
+        max_digits=5, decimal_places=2,
+        write_only=True, required=False, default=Decimal('2'),
     )
 
     class Meta:
@@ -43,62 +48,65 @@ class OrdenCompraCreateSerializer(serializers.ModelSerializer):
         fields = [
             'producto', 'condicion', 'proveedor',
             'numero_orden', 'numero_tracking', 'costo_compra',
-            'costo_importacion', 'estado_logistico', 'precio_venta',
+            'costo_importacion', 'porcentaje_impuesto', 'estado_logistico', 'precio_venta',
         ]
 
     def validate(self, attrs):
-        """Ensure proveedor is provided."""
         if not attrs.get('proveedor'):
             raise serializers.ValidationError("A supplier (proveedor) is required")
         return attrs
 
     def create(self, validated_data):
-        """Create purchase order. UnidadProducto is auto-created via OrdenCompra.save().
-        If precio_venta was supplied, override the auto-calculated unit price."""
         precio_venta = validated_data.pop('precio_venta', None)
-        orden = OrdenCompra.objects.create(
+        pct = validated_data.pop('porcentaje_impuesto', Decimal('2'))
+
+        orden = OrdenCompra(
             usuario_ultima_modificacion=self.context.get('request').user if self.context.get('request') else None,
             **validated_data
         )
+        orden._pct_impuesto = pct
+        orden.save()
+
         if precio_venta and orden.unidad_producto:
             orden.unidad_producto.precio = precio_venta
             orden.unidad_producto.save()
+
         return orden
 
 
 class OrdenCompraUpdateSerializer(serializers.ModelSerializer):
     """
     Serializer for updating purchase order information.
-    impuesto_importacion is read-only (auto-calculated).
+    porcentaje_impuesto is write-only and transient: recalculates impuesto_importacion on save.
+    impuesto_importacion is read-only (always auto-calculated).
     """
     impuesto_importacion = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    porcentaje_impuesto = serializers.DecimalField(
+        max_digits=5, decimal_places=2,
+        write_only=True, required=False, allow_null=True,
+    )
 
     class Meta:
         model = OrdenCompra
         fields = [
             'proveedor', 'numero_orden',
-            'numero_tracking', 'costo_compra', 'costo_importacion', 'impuesto_importacion',
+            'numero_tracking', 'costo_compra', 'costo_importacion',
+            'porcentaje_impuesto', 'impuesto_importacion',
             'estado_logistico'
         ]
 
-    def validate(self, attrs):
-        new_estado = attrs.get('estado_logistico')
-        if new_estado and new_estado != 'viajando' and self.instance and self.instance.unidad_producto:
-            serial = self.instance.unidad_producto.serial
-            if serial.startswith('SIN-SERIAL-'):
-                raise serializers.ValidationError({
-                    'estado_logistico': 'Debe registrar el serial de la unidad antes de cambiar el estado logístico.'
-                })
-        return attrs
-
     def update(self, instance, validated_data):
-        """Update and return the purchase order instance."""
+        pct = validated_data.pop('porcentaje_impuesto', None)
+
         instance.proveedor = validated_data.get('proveedor', instance.proveedor)
         instance.numero_orden = validated_data.get('numero_orden', instance.numero_orden)
         instance.numero_tracking = validated_data.get('numero_tracking', instance.numero_tracking)
         instance.costo_compra = validated_data.get('costo_compra', instance.costo_compra)
         instance.costo_importacion = validated_data.get('costo_importacion', instance.costo_importacion)
         instance.estado_logistico = validated_data.get('estado_logistico', instance.estado_logistico)
+
+        if pct is not None:
+            instance._pct_impuesto = pct
 
         # When order arrives at store (en_oficina), update unit's estado_producto to en_stock
         if instance.estado_logistico == OrdenCompra.EstadoLogisticoChoices.EN_OFICINA:
