@@ -935,6 +935,12 @@ class UnidadProductoSerializer(serializers.ModelSerializer):
     cliente_metodo_aliado_nombre = serializers.CharField(
         source='cliente_metodo_aliado.nombre_completo', read_only=True, default=None
     )
+    ciudad_envio_metodo_aliado_nombre = serializers.CharField(
+        source='ciudad_envio_metodo_aliado.nombre', read_only=True, default=None
+    )
+    ciudad_envio_metodo_aliado_departamento = serializers.CharField(
+        source='ciudad_envio_metodo_aliado.departamento', read_only=True, default=None
+    )
 
     class Meta:
         model = UnidadProducto
@@ -946,7 +952,12 @@ class UnidadProductoSerializer(serializers.ModelSerializer):
             'precio', 'active',
             'cliente_garantia', 'cliente_garantia_nombre',
             'cliente_metodo_aliado', 'cliente_metodo_aliado_nombre',
-            'ciudad_envio_metodo_aliado',
+            'ciudad_envio_metodo_aliado', 'ciudad_envio_metodo_aliado_nombre',
+            'ciudad_envio_metodo_aliado_departamento',
+            'fecha_solicitud_metodo_aliado', 'fecha_envio_metodo_aliado',
+            'fecha_entrega_metodo_aliado',
+            'numero_guia_metodo_aliado', 'transportadora_metodo_aliado',
+            'notas_metodo_aliado',
         ]
 
 
@@ -1003,6 +1014,10 @@ class UnidadProductoUpdateSerializer(serializers.ModelSerializer):
             'serial', 'condicion', 'estado_venta', 'estado_producto', 'precio',
             'cliente_garantia',
             'cliente_metodo_aliado', 'ciudad_envio_metodo_aliado',
+            'fecha_solicitud_metodo_aliado', 'fecha_envio_metodo_aliado',
+            'fecha_entrega_metodo_aliado',
+            'numero_guia_metodo_aliado', 'transportadora_metodo_aliado',
+            'notas_metodo_aliado',
         ]
         extra_kwargs = {
             'serial': {'required': False},
@@ -1013,6 +1028,12 @@ class UnidadProductoUpdateSerializer(serializers.ModelSerializer):
             'cliente_garantia': {'required': False},
             'cliente_metodo_aliado': {'required': False},
             'ciudad_envio_metodo_aliado': {'required': False},
+            'fecha_solicitud_metodo_aliado': {'required': False},
+            'fecha_envio_metodo_aliado': {'required': False},
+            'fecha_entrega_metodo_aliado': {'required': False},
+            'numero_guia_metodo_aliado': {'required': False},
+            'transportadora_metodo_aliado': {'required': False},
+            'notas_metodo_aliado': {'required': False},
         }
 
     def validate(self, attrs):
@@ -1045,11 +1066,27 @@ class UnidadProductoUpdateSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         """Update and return the UnidadProducto instance."""
+        from django.utils import timezone
         request = self.context['request']
         old_estado_producto = instance.estado_producto
+        old_estado_venta = instance.estado_venta
 
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
+
+        # Auto-set fecha_solicitud when entering solicitud_metodo_aliado
+        if (instance.estado_venta == 'solicitud_metodo_aliado'
+                and old_estado_venta != 'solicitud_metodo_aliado'
+                and not instance.fecha_solicitud_metodo_aliado):
+            instance.fecha_solicitud_metodo_aliado = timezone.now()
+
+        # Auto-set fecha_entrega when delivering a método aliado unit
+        if (instance.estado_venta == 'solicitud_metodo_aliado'
+                and instance.estado_producto == 'entregado'
+                and old_estado_producto != 'entregado'
+                and not instance.fecha_entrega_metodo_aliado):
+            instance.fecha_entrega_metodo_aliado = timezone.now()
+
         instance.usuario_ultima_modificacion = request.user
         instance.save()
 
@@ -1084,7 +1121,7 @@ class UnidadReparacionSerializer(serializers.ModelSerializer):
     class Meta:
         model = UnidadProducto
         fields = [
-            'id', 'serial', 'condicion',
+            'id', 'serial', 'condicion', 'precio',
             'producto_nombre', 'producto_marca',
             'estado_venta', 'estado_venta_display',
             'estado_producto', 'estado_producto_display',
@@ -1105,6 +1142,8 @@ class UnidadReparacionSerializer(serializers.ModelSerializer):
             return 'venta'
         if self._active_separacion(obj):
             return 'separacion'
+        if obj.cliente_metodo_aliado_id and not obj.fecha_entrega_metodo_aliado:
+            return 'metodo_aliado'
         return 'stock'
 
     def get_venta_id(self, obj):
@@ -1122,4 +1161,6 @@ class UnidadReparacionSerializer(serializers.ModelSerializer):
         sep = self._active_separacion(obj)
         if sep and sep.cliente:
             return sep.cliente.nombre_completo
+        if obj.cliente_metodo_aliado_id and not obj.fecha_entrega_metodo_aliado:
+            return obj.cliente_metodo_aliado.nombre_completo
         return None

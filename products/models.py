@@ -407,11 +407,45 @@ class UnidadProducto(BaseModel):
         related_name='unidades_metodo_aliado',
         help_text="Client associated with método aliado request"
     )
-    ciudad_envio_metodo_aliado = models.CharField(
-        max_length=200,
+    ciudad_envio_metodo_aliado = models.ForeignKey(
+        'sales.Ciudad',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='unidades_metodo_aliado',
+        help_text="Destination city for método aliado shipment"
+    )
+    fecha_solicitud_metodo_aliado = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp when método aliado was requested"
+    )
+    fecha_envio_metodo_aliado = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp when the unit was shipped"
+    )
+    fecha_entrega_metodo_aliado = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp when the unit was delivered"
+    )
+    numero_guia_metodo_aliado = models.CharField(
+        max_length=100,
         blank=True,
         default='',
-        help_text="Destination city for método aliado shipment (free text)"
+        help_text="Shipping tracking number"
+    )
+    transportadora_metodo_aliado = models.CharField(
+        max_length=100,
+        blank=True,
+        default='',
+        help_text="Carrier / shipping company"
+    )
+    notas_metodo_aliado = models.TextField(
+        blank=True,
+        default='',
+        help_text="Additional notes about the método aliado request"
     )
     descripcion_dano = models.TextField(
         blank=True,

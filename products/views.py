@@ -1006,7 +1006,7 @@ class UnidadProductoListView(ListAPIView):
     def get_queryset(self):
         queryset = UnidadProducto.objects.select_related(
             'producto', 'producto__marca', 'producto__tipo_producto',
-            'cliente_garantia', 'cliente_metodo_aliado',
+            'cliente_garantia', 'cliente_metodo_aliado', 'ciudad_envio_metodo_aliado',
         ).all()
         producto_id = self.request.query_params.get('producto_id')
         if producto_id:
@@ -1028,7 +1028,7 @@ class UnidadProductoDetailView(RetrieveAPIView):
     def get_queryset(self):
         return UnidadProducto.objects.select_related(
             'producto', 'producto__marca', 'producto__tipo_producto',
-            'cliente_garantia', 'cliente_metodo_aliado',
+            'cliente_garantia', 'cliente_metodo_aliado', 'ciudad_envio_metodo_aliado',
         ).all()
 
 
@@ -1156,13 +1156,15 @@ REPAIR_STATES = ('por_reparar', 'en_reparacion')
 
 
 def _derive_origen(unidad):
-    """Return ('stock'|'venta'|'separacion', related_object_or_None)."""
+    """Return ('stock'|'venta'|'separacion'|'metodo_aliado', related_object_or_None)."""
     item = unidad.items_venta.filter(active=True).order_by('-id').first()
     if item:
         return 'venta', item
     sep = unidad.separaciones.filter(active=True).exclude(estado='cancelada').order_by('-id').first()
     if sep:
         return 'separacion', sep
+    if unidad.cliente_metodo_aliado_id and not unidad.fecha_entrega_metodo_aliado:
+        return 'metodo_aliado', unidad.cliente_metodo_aliado
     return 'stock', None
 
 
@@ -1278,6 +1280,9 @@ class CompletarReparacionView(APIView):
         elif origen == 'separacion':
             unidad.estado_venta = 'separado'
             unidad.estado_producto = 'en_stock'
+        elif origen == 'metodo_aliado':
+            unidad.estado_venta = 'solicitud_metodo_aliado'
+            unidad.estado_producto = 'en_stock'
         else:
             unidad.estado_venta = 'sin_vender'
             unidad.estado_producto = 'en_stock'
@@ -1291,4 +1296,130 @@ class CompletarReparacionView(APIView):
             'message': 'Reparación completada',
             'origen': origen,
             'unidad': UnidadReparacionSerializer(unidad).data,
+        }, status=status.HTTP_200_OK)
+
+
+# ---------------------------------------------------------------------------
+# Método Aliado Views
+# ---------------------------------------------------------------------------
+
+class MetodoAliadoListView(ListAPIView):
+    """
+    GET /products/metodo-aliado/list/
+    Lists units currently in the método aliado workflow (not yet delivered).
+    """
+    serializer_class = UnidadProductoSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return (
+            UnidadProducto.objects
+            .filter(estado_venta='solicitud_metodo_aliado', active=True)
+            .select_related(
+                'producto', 'producto__marca', 'producto__tipo_producto',
+                'cliente_metodo_aliado', 'ciudad_envio_metodo_aliado',
+            )
+            .order_by('-fecha_solicitud_metodo_aliado', '-id')
+        )
+
+
+class MarcarEnviadaMetodoAliadoView(APIView):
+    """
+    POST /products/unidades/<pk>/metodo-aliado/marcar-enviada/
+    Body: { "numero_guia_metodo_aliado": "...", "transportadora_metodo_aliado": "..." }
+    Records shipment of a método aliado unit — stamps fecha_envio_metodo_aliado
+    and optionally updates tracking data.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        unidad = get_object_or_404(UnidadProducto, pk=pk)
+
+        if unidad.estado_venta != 'solicitud_metodo_aliado':
+            return Response(
+                {'error': 'Esta unidad no está en el flujo de método aliado.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        numero_guia = request.data.get('numero_guia_metodo_aliado')
+        transportadora = request.data.get('transportadora_metodo_aliado')
+        if numero_guia is not None:
+            unidad.numero_guia_metodo_aliado = numero_guia
+        if transportadora is not None:
+            unidad.transportadora_metodo_aliado = transportadora
+
+        unidad.fecha_envio_metodo_aliado = timezone.now()
+        unidad.usuario_ultima_modificacion = request.user
+        unidad.save()
+
+        return Response({
+            'message': 'Unidad marcada como enviada',
+            'unidad': UnidadProductoSerializer(unidad).data,
+        }, status=status.HTTP_200_OK)
+
+
+class MarcarEntregadaMetodoAliadoView(APIView):
+    """
+    POST /products/unidades/<pk>/metodo-aliado/marcar-entregada/
+    Finalizes a método aliado delivery — stamps fecha_entrega and sets the
+    unit to estado_producto=entregado.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        unidad = get_object_or_404(UnidadProducto, pk=pk)
+
+        if unidad.estado_venta != 'solicitud_metodo_aliado':
+            return Response(
+                {'error': 'Esta unidad no está en el flujo de método aliado.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        unidad.estado_producto = 'entregado'
+        unidad.fecha_entrega_metodo_aliado = timezone.now()
+        unidad.usuario_ultima_modificacion = request.user
+        unidad.save()
+
+        return Response({
+            'message': 'Entrega registrada',
+            'unidad': UnidadProductoSerializer(unidad).data,
+        }, status=status.HTTP_200_OK)
+
+
+class CancelarMetodoAliadoView(APIView):
+    """
+    POST /products/unidades/<pk>/metodo-aliado/cancelar/
+    Reverts a método aliado request — returns the unit to sin_vender / en_stock
+    and clears all método aliado fields.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        unidad = get_object_or_404(UnidadProducto, pk=pk)
+
+        if unidad.estado_venta != 'solicitud_metodo_aliado':
+            return Response(
+                {'error': 'Esta unidad no está en el flujo de método aliado.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        unidad.estado_venta = 'sin_vender'
+        unidad.estado_producto = 'en_stock'
+        unidad.cliente_metodo_aliado = None
+        unidad.ciudad_envio_metodo_aliado = None
+        unidad.fecha_solicitud_metodo_aliado = None
+        unidad.fecha_envio_metodo_aliado = None
+        unidad.fecha_entrega_metodo_aliado = None
+        unidad.numero_guia_metodo_aliado = ''
+        unidad.transportadora_metodo_aliado = ''
+        unidad.notas_metodo_aliado = ''
+        unidad.usuario_ultima_modificacion = request.user
+        unidad.save()
+
+        return Response({
+            'message': 'Solicitud de método aliado cancelada',
+            'unidad': UnidadProductoSerializer(unidad).data,
         }, status=status.HTTP_200_OK)

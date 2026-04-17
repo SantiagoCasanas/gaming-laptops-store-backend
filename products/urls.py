@@ -46,6 +46,10 @@ from .views import (
     ReportarDanoView,
     IniciarReparacionView,
     CompletarReparacionView,
+    MetodoAliadoListView,
+    MarcarEnviadaMetodoAliadoView,
+    MarcarEntregadaMetodoAliadoView,
+    CancelarMetodoAliadoView,
 )
 
 urlpatterns = [
@@ -112,4 +116,10 @@ urlpatterns = [
     path('unidades/<int:pk>/reportar-dano/', ReportarDanoView.as_view(), name='unidad_reportar_dano'),
     path('unidades/<int:pk>/iniciar-reparacion/', IniciarReparacionView.as_view(), name='unidad_iniciar_reparacion'),
     path('unidades/<int:pk>/completar-reparacion/', CompletarReparacionView.as_view(), name='unidad_completar_reparacion'),
+
+    # Método aliado endpoints
+    path('metodo-aliado/list/', MetodoAliadoListView.as_view(), name='metodo_aliado_list'),
+    path('unidades/<int:pk>/metodo-aliado/marcar-enviada/', MarcarEnviadaMetodoAliadoView.as_view(), name='metodo_aliado_marcar_enviada'),
+    path('unidades/<int:pk>/metodo-aliado/marcar-entregada/', MarcarEntregadaMetodoAliadoView.as_view(), name='metodo_aliado_marcar_entregada'),
+    path('unidades/<int:pk>/metodo-aliado/cancelar/', CancelarMetodoAliadoView.as_view(), name='metodo_aliado_cancelar'),
 ]

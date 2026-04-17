@@ -137,6 +137,7 @@ class SeparacionSerializer(serializers.ModelSerializer):
     unidad_serial = serializers.CharField(source='unidad_producto.serial', read_only=True)
     unidad_estado_venta = serializers.CharField(source='unidad_producto.estado_venta', read_only=True)
     unidad_estado_producto = serializers.CharField(source='unidad_producto.estado_producto', read_only=True)
+    unidad_condicion = serializers.CharField(source='unidad_producto.condicion', read_only=True)
     cliente_nombre = serializers.CharField(source='cliente.nombre_completo', read_only=True)
     producto_nombre = serializers.CharField(source='unidad_producto.producto.nombre', read_only=True)
     unidad_precio = serializers.DecimalField(source='unidad_producto.precio', max_digits=14, decimal_places=2, read_only=True)
@@ -145,6 +146,7 @@ class SeparacionSerializer(serializers.ModelSerializer):
         model = Separacion
         fields = [
             'id', 'unidad_producto', 'unidad_serial', 'unidad_estado_venta', 'unidad_estado_producto',
+            'unidad_condicion',
             'producto_nombre', 'unidad_precio',
             'cliente', 'cliente_nombre',
             'valor_abono', 'fecha_separacion', 'fecha_maxima_compra', 'estado', 'active'
@@ -177,13 +179,15 @@ class SeparacionUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Separacion
         fields = [
-            'valor_abono', 'fecha_maxima_compra', 'estado'
+            'cliente', 'valor_abono', 'fecha_separacion', 'fecha_maxima_compra', 'estado'
         ]
 
     def update(self, instance, validated_data):
         """Update and return the hold instance."""
         old_estado = instance.estado
+        instance.cliente = validated_data.get('cliente', instance.cliente)
         instance.valor_abono = validated_data.get('valor_abono', instance.valor_abono)
+        instance.fecha_separacion = validated_data.get('fecha_separacion', instance.fecha_separacion)
         instance.fecha_maxima_compra = validated_data.get('fecha_maxima_compra', instance.fecha_maxima_compra)
         instance.estado = validated_data.get('estado', instance.estado)
         instance.save()
@@ -231,7 +235,8 @@ class CiudadByCiudadDepartamentoSerializer(serializers.ModelSerializer):
 class ItemVentaSerializer(serializers.ModelSerializer):
     """Serializer for ItemVenta model."""
     unidad_serial = serializers.CharField(source='unidad_producto.serial', read_only=True)
-    producto_nombre = serializers.CharField(source='unidad_producto.variante.producto.nombre', read_only=True)
+    producto_nombre = serializers.CharField(source='unidad_producto.producto.nombre', read_only=True)
+    unidad_condicion = serializers.CharField(source='unidad_producto.condicion', read_only=True)
     unidad_estado_producto = serializers.CharField(source='unidad_producto.estado_producto', read_only=True)
     unidad_estado_venta = serializers.CharField(source='unidad_producto.estado_venta', read_only=True)
 
@@ -239,6 +244,7 @@ class ItemVentaSerializer(serializers.ModelSerializer):
         model = ItemVenta
         fields = [
             'id', 'venta', 'unidad_producto', 'unidad_serial', 'producto_nombre',
+            'unidad_condicion',
             'unidad_estado_producto', 'unidad_estado_venta',
             'precio', 'active',
         ]
