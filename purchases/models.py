@@ -171,7 +171,7 @@ class OrdenCompra(BaseModel):
             if self.estado_logistico == 'viajando':
                 estado_producto = 'viajando'
             elif self.estado_logistico == 'en_oficina_importadora':
-                estado_producto = 'por_comprar'
+                estado_producto = 'en_oficina_importadora'
             else:  # en_oficina
                 estado_producto = 'en_stock'
 

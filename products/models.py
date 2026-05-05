@@ -343,6 +343,7 @@ class UnidadProducto(BaseModel):
     class EstadoProductoChoices(models.TextChoices):
         EN_STOCK = 'en_stock', 'En Oficina'
         VIAJANDO = 'viajando', 'Viajando'
+        EN_OFICINA_IMPORTADORA = 'en_oficina_importadora', 'En Oficina Importadora'
         POR_COMPRAR = 'por_comprar', 'Por Comprar'
         POR_ENTREGAR = 'por_entregar', 'Por Entregar'
         ENTREGADO = 'entregado', 'Entregado'
@@ -371,7 +372,7 @@ class UnidadProducto(BaseModel):
         help_text="Commercial status of this unit"
     )
     estado_producto = models.CharField(
-        max_length=20,
+        max_length=30,
         choices=EstadoProductoChoices.choices,
         default=EstadoProductoChoices.EN_STOCK,
         null=False,

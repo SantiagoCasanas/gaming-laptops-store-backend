@@ -18,8 +18,8 @@ When matched and committed:
   • OrdenCompra.costo_importacion → valor en COP from the row (stored in COP per
     explicit user requirement, even though costo_compra is in USD)
   • OrdenCompra.fecha_en_oficina_importadora is auto-stamped by the model save()
-  • UnidadProducto (if exists) → estado_producto='por_comprar' to mirror the
-    logistic transition
+  • UnidadProducto (if exists) → estado_producto='en_oficina_importadora' to
+    mirror the logistic transition
 """
 from __future__ import annotations
 
@@ -210,7 +210,7 @@ def _apply_match(orden: OrdenCompra, valor_cop: Decimal, usuario):
 
         unidad = orden.unidad_producto
         if unidad and unidad.estado_producto == "viajando":
-            unidad.estado_producto = "por_comprar"
+            unidad.estado_producto = "en_oficina_importadora"
             unidad.usuario_ultima_modificacion = usuario
             unidad.save(update_fields=["estado_producto", "usuario_ultima_modificacion"])
 
