@@ -88,6 +88,31 @@ class OrdenCompra(BaseModel):
         editable=False,
         help_text="Calculated as porcentaje_impuesto% of costo_compra (set via serializer)"
     )
+    fecha_compra = models.DateField(
+        blank=True,
+        null=True,
+        help_text="Real transaction date (editable). Defaults to creation date if omitted."
+    )
+    fecha_estimada_llegada = models.DateField(
+        blank=True,
+        null=True,
+        help_text="ETA: auto-computed as fecha_compra + 15 business days (Mon-Fri). Editable."
+    )
+    fecha_en_viaje = models.DateTimeField(
+        blank=True,
+        null=True,
+        help_text="Timestamp when estado_logistico transitioned to 'viajando'."
+    )
+    fecha_en_oficina_importadora = models.DateTimeField(
+        blank=True,
+        null=True,
+        help_text="Timestamp when estado_logistico transitioned to 'en_oficina_importadora'."
+    )
+    fecha_en_oficina = models.DateTimeField(
+        blank=True,
+        null=True,
+        help_text="Timestamp when estado_logistico transitioned to 'en_oficina'."
+    )
     usuario_ultima_modificacion = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -106,10 +131,29 @@ class OrdenCompra(BaseModel):
         from decimal import Decimal
         from django.utils.timezone import now
         from core.services.trm_service import get_trm_for_date
+        from core.services.business_days import add_business_days
 
         # Use percentage provided by serializer via _pct_impuesto; default 2%
         pct = getattr(self, '_pct_impuesto', Decimal('2'))
         self.impuesto_importacion = self.costo_compra * (pct / Decimal('100'))
+
+        # Default fecha_compra to today on first save if not provided.
+        today = now().date()
+        if not self.fecha_compra:
+            self.fecha_compra = today
+
+        # Auto-compute ETA (fecha_compra + 15 business days) if not provided.
+        if not self.fecha_estimada_llegada:
+            self.fecha_estimada_llegada = add_business_days(self.fecha_compra, 15)
+
+        # Populate transition timestamps idempotently for the current status.
+        current_now = now()
+        if self.estado_logistico == 'viajando' and not self.fecha_en_viaje:
+            self.fecha_en_viaje = current_now
+        elif self.estado_logistico == 'en_oficina_importadora' and not self.fecha_en_oficina_importadora:
+            self.fecha_en_oficina_importadora = current_now
+        elif self.estado_logistico == 'en_oficina' and not self.fecha_en_oficina:
+            self.fecha_en_oficina = current_now
 
         super().save(*args, **kwargs)
 

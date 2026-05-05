@@ -23,7 +23,8 @@ class OrdenCompraSerializer(serializers.ModelSerializer):
             'unidad_producto', 'unidad_serial', 'unidad_precio', 'estado_logistico',
             'proveedor', 'proveedor_nombre',
             'numero_orden', 'numero_tracking', 'costo_compra',
-            'costo_importacion', 'impuesto_importacion', 'active'
+            'costo_importacion', 'impuesto_importacion',
+            'fecha_compra', 'fecha_estimada_llegada', 'active'
         ]
 
 
@@ -49,6 +50,7 @@ class OrdenCompraCreateSerializer(serializers.ModelSerializer):
             'producto', 'condicion', 'proveedor',
             'numero_orden', 'numero_tracking', 'costo_compra',
             'costo_importacion', 'porcentaje_impuesto', 'estado_logistico', 'precio_venta',
+            'fecha_compra',
         ]
 
     def validate(self, attrs):
@@ -92,7 +94,7 @@ class OrdenCompraUpdateSerializer(serializers.ModelSerializer):
             'proveedor', 'numero_orden',
             'numero_tracking', 'costo_compra', 'costo_importacion',
             'porcentaje_impuesto', 'impuesto_importacion',
-            'estado_logistico'
+            'estado_logistico', 'fecha_compra',
         ]
 
     def update(self, instance, validated_data):
@@ -104,6 +106,7 @@ class OrdenCompraUpdateSerializer(serializers.ModelSerializer):
         instance.costo_compra = validated_data.get('costo_compra', instance.costo_compra)
         instance.costo_importacion = validated_data.get('costo_importacion', instance.costo_importacion)
         instance.estado_logistico = validated_data.get('estado_logistico', instance.estado_logistico)
+        instance.fecha_compra = validated_data.get('fecha_compra', instance.fecha_compra)
 
         if pct is not None:
             instance._pct_impuesto = pct

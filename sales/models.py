@@ -216,6 +216,17 @@ class Venta(BaseModel):
         POR_ENTREGAR = 'por_entregar', 'Pending Delivery'
         ENTREGADO = 'entregado', 'Delivered'
 
+    class CanalChoices(models.TextChoices):
+        TIENDA_FISICA = 'tienda_fisica', 'Tienda física'
+        WHATSAPP = 'whatsapp', 'WhatsApp'
+        FACEBOOK = 'facebook', 'Facebook'
+        INSTAGRAM = 'instagram', 'Instagram'
+        OTRO = 'otro', 'Otro'
+
+    class TipoEntregaChoices(models.TextChoices):
+        LOCAL = 'local', 'Recogida en tienda'
+        ENVIO = 'envio', 'Envío a domicilio'
+
     cliente = models.ForeignKey(
         Cliente,
         on_delete=models.PROTECT,
@@ -250,6 +261,24 @@ class Venta(BaseModel):
         blank=True,
         null=True,
         help_text="Date and time when the sale was delivered"
+    )
+    canal = models.CharField(
+        max_length=20,
+        choices=CanalChoices.choices,
+        default=CanalChoices.TIENDA_FISICA,
+        help_text="Channel through which the sale was closed"
+    )
+    tipo_entrega = models.CharField(
+        max_length=10,
+        choices=TipoEntregaChoices.choices,
+        default=TipoEntregaChoices.LOCAL,
+        help_text="Delivery modality agreed with the customer"
+    )
+    costo_envio_local = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        help_text="Shipping cost inside Colombia absorbed by the business. 0 if local pickup."
     )
     usuario_ultima_modificacion = models.ForeignKey(
         settings.AUTH_USER_MODEL,
