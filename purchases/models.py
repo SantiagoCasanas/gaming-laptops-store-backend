@@ -71,14 +71,14 @@ class OrdenCompra(BaseModel):
         max_digits=14,
         decimal_places=2,
         null=False,
-        help_text="Purchase cost (typically in USD)"
+        help_text="Purchase cost in COP. Forms may accept the value in USD for convenience and convert before saving."
     )
     costo_importacion = models.DecimalField(
         max_digits=14,
         decimal_places=2,
         blank=True,
         null=True,
-        help_text="Import costs if applicable (optional)"
+        help_text="Import costs in COP (optional). Set in COP via the bulk import upload."
     )
     impuesto_importacion = models.DecimalField(
         max_digits=14,
@@ -86,7 +86,7 @@ class OrdenCompra(BaseModel):
         null=False,
         default=0,
         editable=False,
-        help_text="Calculated as porcentaje_impuesto% of costo_compra (set via serializer)"
+        help_text="Calculated as porcentaje_impuesto% of costo_compra (in COP, same currency as costo_compra)"
     )
     fecha_compra = models.DateField(
         blank=True,
@@ -130,7 +130,6 @@ class OrdenCompra(BaseModel):
         import uuid
         from decimal import Decimal
         from django.utils.timezone import now
-        from core.services.trm_service import get_trm_for_date
         from core.services.business_days import add_business_days
 
         # Use percentage provided by serializer via _pct_impuesto; default 2%
@@ -176,12 +175,13 @@ class OrdenCompra(BaseModel):
             else:  # en_oficina
                 estado_producto = 'en_stock'
 
-            # Auto-calculate unit price: round((costo_total * 1.2 * TRM - 90000) / 100000) * 100000 + 90000
-            trm = get_trm_for_date(now().date())
-            costo_importacion = self.costo_importacion or Decimal('0')
+            # Auto-calculate unit price. All inputs are now in COP — no TRM
+            # conversion required. Apply the 20% margin and round to the
+            # nearest 100k + 90k tail (e.g. 4_290_000, 4_390_000, ...).
+            costo_importacion_cop = self.costo_importacion or Decimal('0')
             impuesto = self.costo_compra * (pct / Decimal('100'))
-            total_usd = self.costo_compra + costo_importacion + impuesto
-            raw = total_usd * Decimal('1.2') * trm.valor_cop
+            total_cop = self.costo_compra + impuesto + costo_importacion_cop
+            raw = total_cop * Decimal('1.2')
             unit_price = (round((raw - Decimal('90000')) / Decimal('100000'))) * Decimal('100000') + Decimal('90000')
 
             # Create the unit

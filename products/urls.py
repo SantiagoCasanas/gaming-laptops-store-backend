@@ -50,6 +50,10 @@ from .views import (
     MarcarEnviadaMetodoAliadoView,
     MarcarEntregadaMetodoAliadoView,
     CancelarMetodoAliadoView,
+    PlantillaCargueMasivoView,
+    CargueMasivoView,
+    ConfirmarCargueMasivoView,
+    ProductoUploadImagenesView,
 )
 
 urlpatterns = [
@@ -116,6 +120,12 @@ urlpatterns = [
     path('unidades/<int:pk>/reportar-dano/', ReportarDanoView.as_view(), name='unidad_reportar_dano'),
     path('unidades/<int:pk>/iniciar-reparacion/', IniciarReparacionView.as_view(), name='unidad_iniciar_reparacion'),
     path('unidades/<int:pk>/completar-reparacion/', CompletarReparacionView.as_view(), name='unidad_completar_reparacion'),
+
+    # Bulk product upload (template + dry-run preview + commit)
+    path('cargue-masivo/plantilla/<int:tipo_producto_id>/', PlantillaCargueMasivoView.as_view(), name='cargue_masivo_plantilla'),
+    path('cargue-masivo/', CargueMasivoView.as_view(), name='cargue_masivo'),
+    path('cargue-masivo/confirmar/', ConfirmarCargueMasivoView.as_view(), name='cargue_masivo_confirmar'),
+    path('productos/<int:pk>/imagenes/upload/', ProductoUploadImagenesView.as_view(), name='producto_imagenes_upload'),
 
     # Método aliado endpoints
     path('metodo-aliado/list/', MetodoAliadoListView.as_view(), name='metodo_aliado_list'),

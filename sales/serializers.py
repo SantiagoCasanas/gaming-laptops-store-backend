@@ -269,7 +269,12 @@ class VentaSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Venta
-        fields = ['id', 'cliente', 'cliente_nombre', 'fecha', 'notas', 'separacion', 'items', 'total', 'estado_entrega', 'active']
+        fields = [
+            'id', 'cliente', 'cliente_nombre', 'fecha', 'notas', 'separacion',
+            'items', 'total', 'estado_entrega', 'tipo_entrega',
+            'transportadora', 'numero_guia', 'fecha_envio', 'fecha_entrega_envio',
+            'active',
+        ]
 
     def get_total(self, obj):
         """Calculate total sale amount."""
@@ -306,16 +311,24 @@ class VentaCreateSerializer(serializers.ModelSerializer):
 
 
 class VentaUpdateSerializer(serializers.ModelSerializer):
-    """Serializer for updating Venta — cliente, notas, and estado_entrega are editable."""
+    """
+    Serializer for updating Venta. Editable fields cover both basic sale
+    metadata and shipment information so the admin can register or update a
+    shipment (transportadora + numero_guia) or switch tipo_entrega to local
+    pickup without leaving the page.
+    """
     class Meta:
         model = Venta
-        fields = ['cliente', 'notas', 'estado_entrega']
+        fields = [
+            'cliente', 'notas', 'estado_entrega', 'tipo_entrega',
+            'transportadora', 'numero_guia', 'fecha_envio', 'fecha_entrega_envio',
+        ]
 
     def update(self, instance, validated_data):
         old_estado = instance.estado_entrega
-        instance.cliente = validated_data.get('cliente', instance.cliente)
-        instance.notas = validated_data.get('notas', instance.notas)
-        instance.estado_entrega = validated_data.get('estado_entrega', instance.estado_entrega)
+        for field in self.Meta.fields:
+            if field in validated_data:
+                setattr(instance, field, validated_data[field])
         instance.save()
 
         # Cascade to units when sale is marked as delivered

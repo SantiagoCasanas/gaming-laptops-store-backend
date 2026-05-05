@@ -126,9 +126,10 @@ def _aggregate_sales_for_range(start: date, end: date, trm: Decimal) -> dict:
     """
     Walk every ItemVenta whose Venta.fecha falls in [start, end), pre-fetching
     the linked UnidadProducto.orden_compra. Returns ventas + ganancia in COP
-    in one pass (one query). ItemVenta.precio is already COP; OrdenCompra
-    costs are USD and converted via `trm`. Items whose unit has no OrdenCompra
-    are skipped from profit (with a warning) but still counted in ventas.
+    in one pass (one query). All inputs are now in COP — costo_compra,
+    impuesto_importacion and costo_importacion all live in COP, no TRM
+    conversion is needed. The `trm` parameter is kept for backwards
+    compatibility but is not consumed for the cost legs.
     """
     aware_start, aware_end = (
         timezone.make_aware(datetime.combine(start, datetime.min.time())),
@@ -152,9 +153,10 @@ def _aggregate_sales_for_range(start: date, end: date, trm: Decimal) -> dict:
                 item.pk, item.unidad_producto_id,
             )
             continue
-        costo_cop = (oc.costo_compra or ZERO) * trm
-        impuesto_cop = (oc.impuesto_importacion or ZERO) * trm
-        ganancia += precio - costo_cop - impuesto_cop
+        costo = oc.costo_compra or ZERO
+        impuesto = oc.impuesto_importacion or ZERO
+        importacion = oc.costo_importacion or ZERO
+        ganancia += precio - costo - impuesto - importacion
 
     return {'ventas': ventas, 'ganancia': ganancia}
 
@@ -198,20 +200,24 @@ def get_kpis(month: date) -> dict:
     )
 
     # Q5 — units in transit (purchase orders) for the selected month, scoped by
-    # fecha_compra. POs from other months should not surface here even if they
-    # are still in transit. Sum is in USD; convert to COP.
+    # fecha_compra. All cost legs are stored in COP, so no TRM conversion is
+    # required.
     viajando = OrdenCompra.objects.filter(
         estado_logistico='viajando',
         fecha_compra__gte=start, fecha_compra__lt=end,
     ).aggregate(
         cantidad=Count('id'),
-        valor_usd=Coalesce(
-            Sum(F('costo_compra') + F('impuesto_importacion')),
+        valor_cop=Coalesce(
+            Sum(
+                F('costo_compra')
+                + F('impuesto_importacion')
+                + Coalesce(F('costo_importacion'), Decimal('0')),
+            ),
             ZERO,
             output_field=DecimalField(max_digits=20, decimal_places=2),
         ),
     )
-    viajando_valor_cop = (viajando['valor_usd'] or ZERO) * trm
+    viajando_valor_cop = viajando['valor_cop'] or ZERO
 
     # Q6 — damaged units. Origin via Exists subquery on ItemVenta.
     has_sale = Exists(ItemVenta.objects.filter(unidad_producto=OuterRef('pk')))
@@ -380,13 +386,11 @@ def _months_back(month: date, n: int) -> list[date]:
 def get_imports_expenses(month: date, lookback: int = 6) -> list[dict]:
     """
     Last `lookback` months (including selected) of import costs + tax, in COP.
-    OrdenCompra.costo_compra and impuesto_importacion are stored in USD; we
-    convert to COP using the latest TRM.
+    All OrdenCompra cost legs are stored in COP — no TRM conversion needed.
     """
     months = _months_back(month, lookback)
     window_start = months[0]
     _, window_end = month_range(months[-1])
-    trm = _get_active_trm()
 
     rows = (
         OrdenCompra.objects
@@ -405,8 +409,8 @@ def get_imports_expenses(month: date, lookback: int = 6) -> list[dict]:
     return [
         {
             'mes': m.strftime('%Y-%m'),
-            'valor_importacion': ((by_month.get(m.strftime('%Y-%m'), {}).get('valor_importacion') or ZERO) * trm),
-            'impuesto': ((by_month.get(m.strftime('%Y-%m'), {}).get('impuesto') or ZERO) * trm),
+            'valor_importacion': by_month.get(m.strftime('%Y-%m'), {}).get('valor_importacion') or ZERO,
+            'impuesto': by_month.get(m.strftime('%Y-%m'), {}).get('impuesto') or ZERO,
         }
         for m in months
     ]

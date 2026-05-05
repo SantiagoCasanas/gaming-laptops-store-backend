@@ -6,6 +6,8 @@ from .views import (
     OrdenCompraDetailView,
     OrdenCompraActivateView,
     OrdenCompraDeactivateView,
+    PlantillaImportacionView,
+    CargarImportacionView,
 )
 
 urlpatterns = [
@@ -15,4 +17,8 @@ urlpatterns = [
     path('ordenes-compra/detail/<int:pk>/', OrdenCompraDetailView.as_view(), name='orden_compra_detail'),
     path('ordenes-compra/activate/<int:pk>/', OrdenCompraActivateView.as_view(), name='orden_compra_activate'),
     path('ordenes-compra/deactivate/<int:pk>/', OrdenCompraDeactivateView.as_view(), name='orden_compra_deactivate'),
+
+    # Importaciones — cargue masivo de actualizaciones desde Excel
+    path('importaciones/plantilla/', PlantillaImportacionView.as_view(), name='importacion_plantilla'),
+    path('importaciones/cargar/', CargarImportacionView.as_view(), name='importacion_cargar'),
 ]

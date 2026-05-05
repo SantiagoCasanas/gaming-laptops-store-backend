@@ -1423,3 +1423,153 @@ class CancelarMetodoAliadoView(APIView):
             'message': 'Solicitud de método aliado cancelada',
             'unidad': UnidadProductoSerializer(unidad).data,
         }, status=status.HTTP_200_OK)
+
+
+# ============================================================================
+# Bulk product upload (cargue masivo) — template download + dry-run preview +
+# commit. See products/services/bulk_upload.py for the parsing/validation
+# logic; the views are thin wrappers around it.
+# ============================================================================
+from django.http import HttpResponse
+from io import BytesIO as _BytesIO
+from .services.bulk_upload import build_template_workbook, parse_and_validate
+
+
+class PlantillaCargueMasivoView(APIView):
+    """
+    GET /products/cargue-masivo/plantilla/<int:tipo_producto_id>/
+    Returns an .xlsx template with one column per CampoProducto associated to
+    the given TipoProducto. The user fills it in and uploads it back via
+    POST /products/cargue-masivo/.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, tipo_producto_id):
+        tipo = get_object_or_404(TipoProducto, pk=tipo_producto_id)
+        wb = build_template_workbook(tipo)
+        buffer = _BytesIO()
+        wb.save(buffer)
+        buffer.seek(0)
+
+        filename = f"Plantilla_{tipo.nombre.replace(chr(32), chr(95))}.xlsx"
+        response = HttpResponse(
+            buffer.read(),
+            content_type=(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ),
+        )
+        response["Content-Disposition"] = f"attachment; filename=\"{filename}\""
+        return response
+
+
+class CargueMasivoView(APIView):
+    """
+    POST /products/cargue-masivo/
+    multipart/form-data: tipo_producto (id), archivo (xlsx), dry_run (bool).
+    Default dry_run=true. Returns the preview dict with creados/ignorados/fallidos.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        tipo_producto_id = request.data.get("tipo_producto")
+        archivo = request.FILES.get("archivo")
+        dry_run_raw = str(request.data.get("dry_run", "true")).strip().lower()
+        dry_run = dry_run_raw not in ("false", "0", "no")
+
+        if not tipo_producto_id:
+            return Response(
+                {"error": "tipo_producto es obligatorio"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not archivo:
+            return Response(
+                {"error": "archivo es obligatorio"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        tipo = get_object_or_404(TipoProducto, pk=tipo_producto_id)
+        result = parse_and_validate(tipo, archivo, dry_run=dry_run, usuario=request.user)
+        return Response(result, status=status.HTTP_200_OK)
+
+
+
+class ConfirmarCargueMasivoView(APIView):
+    """
+    POST /products/cargue-masivo/confirmar/
+    Body JSON: { "tipo_producto": <id>, "rows": [{ "data": {...}, "fila": n }, ...] }
+    Persists each row after re-validation. Returns a dict with creados/ignorados/fallidos
+    where creados include the new producto id and the marca name.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        tipo_producto_id = request.data.get("tipo_producto")
+        rows = request.data.get("rows") or []
+
+        if not tipo_producto_id:
+            return Response(
+                {"error": "tipo_producto es obligatorio"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not isinstance(rows, list):
+            return Response(
+                {"error": "rows debe ser una lista"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        tipo = get_object_or_404(TipoProducto, pk=tipo_producto_id)
+        from .services.bulk_upload import confirm_edited_rows
+        result = confirm_edited_rows(tipo, rows, usuario=request.user)
+        return Response(result, status=status.HTTP_200_OK)
+
+
+class ProductoUploadImagenesView(APIView):
+    """
+    POST /products/productos/<int:pk>/imagenes/upload/
+    multipart/form-data with `image_0`, `image_1`, ... up to 10 files. Caps at
+    10 total images per producto (existing + new). Returns the producto with
+    its updated imagenes list.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        from .models import ImagenProducto
+        from .serializers import ImagenProductoSerializer
+
+        producto = get_object_or_404(Producto, pk=pk)
+
+        MAX_IMAGES = 10
+        current_count = producto.imagenes.count()
+        remaining = MAX_IMAGES - current_count
+
+        if remaining <= 0:
+            return Response(
+                {"error": f"Este producto ya tiene {MAX_IMAGES} imágenes (máximo)."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        created = []
+        for i in range(MAX_IMAGES):
+            img_file = request.FILES.get(f"image_{i}")
+            if not img_file:
+                continue
+            if len(created) >= remaining:
+                break
+            imagen = ImagenProducto.objects.create(
+                producto=producto,
+                url=img_file,
+                orden=current_count + len(created),
+            )
+            created.append(imagen)
+
+        return Response(
+            {
+                "message": f"{len(created)} imagen{'es' if len(created) != 1 else ''} subida{'s' if len(created) != 1 else ''}",
+                "imagenes_count": producto.imagenes.count(),
+                "imagenes": ImagenProductoSerializer(
+                    producto.imagenes.all(), many=True, context={"request": request}
+                ).data,
+            },
+            status=status.HTTP_201_CREATED,
+        )

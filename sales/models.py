@@ -280,6 +280,28 @@ class Venta(BaseModel):
         default=0,
         help_text="Shipping cost inside Colombia absorbed by the business. 0 if local pickup."
     )
+    transportadora = models.CharField(
+        max_length=100,
+        blank=True,
+        default='',
+        help_text="Carrier / shipping company. Empty when delivery is in-store pickup."
+    )
+    numero_guia = models.CharField(
+        max_length=100,
+        blank=True,
+        default='',
+        help_text="Tracking number provided by the carrier. Empty for in-store pickups."
+    )
+    fecha_envio = models.DateTimeField(
+        blank=True,
+        null=True,
+        help_text="Timestamp when the sale was dispatched (only for tipo_entrega=envio)."
+    )
+    fecha_entrega_envio = models.DateTimeField(
+        blank=True,
+        null=True,
+        help_text="Timestamp when the carrier confirmed delivery (only for tipo_entrega=envio)."
+    )
     usuario_ultima_modificacion = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
