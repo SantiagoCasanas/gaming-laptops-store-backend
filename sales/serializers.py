@@ -273,7 +273,7 @@ class VentaSerializer(serializers.ModelSerializer):
             'id', 'cliente', 'cliente_nombre', 'fecha', 'notas', 'separacion',
             'items', 'total', 'estado_entrega', 'tipo_entrega',
             'transportadora', 'numero_guia', 'fecha_envio', 'fecha_entrega_envio',
-            'active',
+            'fecha_entrega', 'active',
         ]
 
     def get_total(self, obj):
@@ -325,10 +325,23 @@ class VentaUpdateSerializer(serializers.ModelSerializer):
         ]
 
     def update(self, instance, validated_data):
+        from django.utils import timezone
+
         old_estado = instance.estado_entrega
         for field in self.Meta.fields:
             if field in validated_data:
                 setattr(instance, field, validated_data[field])
+
+        # When the sale transitions to delivered, stamp fecha_entrega and the
+        # shipment delivery timestamp if they aren't already set, so the
+        # downstream tracking UI knows the moment of delivery.
+        if old_estado != 'entregado' and instance.estado_entrega == 'entregado':
+            now = timezone.now()
+            if not instance.fecha_entrega:
+                instance.fecha_entrega = now
+            if instance.tipo_entrega == 'envio' and not instance.fecha_entrega_envio:
+                instance.fecha_entrega_envio = now
+
         instance.save()
 
         # Cascade to units when sale is marked as delivered
