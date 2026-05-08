@@ -13,24 +13,27 @@ Public functions:
             {
                 "dry_run": bool,
                 "total": int,
-                "creados":   [{"fila": n, "nombre": ..., "data": {...}}, ...],
-                "ignorados": [{"fila": n, "nombre": ..., "data": {...},
-                               "motivo": "ya_existe"}, ...],
-                "fallidos":  [{"fila": n, "nombre": ..., "data": {...},
-                               "errores": [str, ...]}, ...],
+                "creados":      [{"fila": n, "nombre": ..., "data": {...}}, ...],
+                "actualizados": [{"fila": n, "nombre": ..., "data": {...}}, ...],
+                "fallidos":     [{"fila": n, "nombre": ..., "data": {...},
+                                  "errores": [str, ...]}, ...],
             }
-        Idempotency by Producto.nombre (case-insensitive). When dry_run=False,
-        valid rows are persisted (each in its own transaction).
+        Idempotency by Producto.nombre (case-insensitive): rows whose nombre
+        matches an existing Producto go to `actualizados` and, when
+        dry_run=False, the existing record (descripcion, marca,
+        ProductoCampoValor) is overwritten with the row's values. Brand-new
+        rows go to `creados`.
 
   • confirm_edited_rows(tipo_producto, rows, usuario)
         Re-validates and persists rows previously returned in the preview and
         edited by the user on the frontend. `rows` is a list of dicts with at
         minimum a `data` key containing the column → value map. Returns
             {
-                "creados": [{"id": int, "nombre": str, "marca_nombre": str,
-                             "imagenes_count": 0}, ...],
-                "ignorados": [{"nombre": str, "motivo": "ya_existe"}, ...],
-                "fallidos": [{"nombre": str, "errores": [...]}, ...],
+                "creados":      [{"id": int, "nombre": str, "marca_nombre": str,
+                                  "imagenes_count": int}, ...],
+                "actualizados": [{"id": int, "nombre": str, "marca_nombre": str,
+                                  "imagenes_count": int}, ...],
+                "fallidos":     [{"nombre": str, "errores": [...]}, ...],
             }
 """
 from __future__ import annotations
@@ -148,6 +151,20 @@ def _build_marca_index() -> dict[str, Brand]:
     return {b.name.lower(): b for b in Brand.objects.all()}
 
 
+def _apply_dynamic_values(producto, dynamic_values):
+    """Recreate the ProductoCampoValor rows for `producto` from scratch."""
+    ProductoCampoValor.objects.filter(producto=producto).delete()
+    for campo, tipo, value in dynamic_values:
+        kwargs = {'producto': producto, 'campo_producto': campo}
+        if tipo == 'texto':
+            kwargs['valor_texto'] = str(value)
+        elif tipo == 'numero':
+            kwargs['valor_numero'] = value
+        elif tipo == 'booleano':
+            kwargs['valor_booleano'] = bool(value)
+        ProductoCampoValor.objects.create(**kwargs)
+
+
 def _save_row(producto_data: dict, dynamic_values: list[tuple[CampoProducto, str, object]], usuario):
     """Persist a Producto + all its ProductoCampoValor rows atomically."""
     with transaction.atomic():
@@ -158,15 +175,25 @@ def _save_row(producto_data: dict, dynamic_values: list[tuple[CampoProducto, str
             tipo_producto=producto_data['tipo_producto'],
             usuario_ultima_modificacion=usuario,
         )
-        for campo, tipo, value in dynamic_values:
-            kwargs = {'producto': producto, 'campo_producto': campo}
-            if tipo == 'texto':
-                kwargs['valor_texto'] = str(value)
-            elif tipo == 'numero':
-                kwargs['valor_numero'] = value
-            elif tipo == 'booleano':
-                kwargs['valor_booleano'] = bool(value)
-            ProductoCampoValor.objects.create(**kwargs)
+        _apply_dynamic_values(producto, dynamic_values)
+    return producto
+
+
+def _update_row(producto, producto_data: dict, dynamic_values: list[tuple[CampoProducto, str, object]], usuario):
+    """
+    Overwrite an existing Producto with the values from a bulk-upload row.
+    Updates descripcion, marca, tipo_producto and replaces the entire set of
+    ProductoCampoValor rows. Nombre is the lookup key — never modified here.
+    """
+    with transaction.atomic():
+        producto.descripcion = producto_data['descripcion'] or producto_data['nombre']
+        producto.marca = producto_data['marca']
+        producto.tipo_producto = producto_data['tipo_producto']
+        producto.usuario_ultima_modificacion = usuario
+        producto.save(update_fields=[
+            'descripcion', 'marca', 'tipo_producto', 'usuario_ultima_modificacion',
+        ])
+        _apply_dynamic_values(producto, dynamic_values)
     return producto
 
 
@@ -194,23 +221,21 @@ def _validate_row(
     raw_data: dict,
     tipo_producto: TipoProducto,
     marca_index: dict,
-    existing_names: set,
     expected_dynamic: dict,
 ):
     """
     Validate a single row's `data` dict (column → raw value).
-    Returns (status, payload) where status is one of:
-        'creado'   → payload = {'producto_data': {...}, 'dynamic_values': [...]}
-        'ignorado' → payload = {'motivo': 'ya_existe'}
-        'fallido'  → payload = {'errores': [str, ...]}
-    `nombre` (already validated) is also returned for caller convenience.
+    Returns (status, nombre, payload) where status is one of:
+        'valido'  → payload = {'producto_data': {...}, 'dynamic_values': [...]}
+        'fallido' → payload = {'errores': [str, ...]}
+
+    Whether a `valido` row results in an insert or an update is decided by the
+    caller based on its own existing-product index — `_validate_row` does not
+    look at duplicates.
     """
     nombre = str(raw_data.get('nombre') or '').strip()
     if not nombre:
         return 'fallido', '', {'errores': ['nombre es obligatorio']}
-
-    if nombre.lower() in existing_names:
-        return 'ignorado', nombre, {'motivo': 'ya_existe'}
 
     errores: list[str] = []
     descripcion = str(raw_data.get('descripcion') or '').strip()
@@ -238,7 +263,7 @@ def _validate_row(
     if errores:
         return 'fallido', nombre, {'errores': errores}
 
-    return 'creado', nombre, {
+    return 'valido', nombre, {
         'producto_data': {
             'nombre': nombre,
             'descripcion': descripcion,
@@ -258,14 +283,14 @@ def parse_and_validate(tipo_producto: TipoProducto, uploaded_file, dry_run: bool
             'dry_run': dry_run,
             'total': 0,
             'creados': [],
-            'ignorados': [],
+            'actualizados': [],
             'fallidos': [{'fila': 0, 'nombre': '', 'data': {}, 'errores': [f'No se pudo leer el archivo: {exc}']}],
         }
 
     ws = wb.active
     rows = list(ws.iter_rows(values_only=True))
     if not rows:
-        return {'dry_run': dry_run, 'total': 0, 'creados': [], 'ignorados': [], 'fallidos': []}
+        return {'dry_run': dry_run, 'total': 0, 'creados': [], 'actualizados': [], 'fallidos': []}
 
     headers = [str(c).strip() if c is not None else '' for c in rows[0]]
     header_index = {h: i for i, h in enumerate(headers) if h}
@@ -281,9 +306,11 @@ def parse_and_validate(tipo_producto: TipoProducto, uploaded_file, dry_run: bool
         ):
             data_start = 2
 
-    creados, ignorados, fallidos = [], [], []
+    creados, actualizados, fallidos = [], [], []
     marca_index = _build_marca_index()
-    existing_names = {p.lower() for p in Producto.objects.values_list('nombre', flat=True)}
+    # Map name (lowercased) → existing Producto, so we can decide insert vs.
+    # update without re-querying on each row.
+    existing_index = {p.nombre.lower(): p for p in Producto.objects.all()}
 
     for row_idx, raw_row in enumerate(rows[data_start:], start=data_start + 1):
         if raw_row is None or all(v in (None, '') for v in raw_row):
@@ -312,7 +339,6 @@ def parse_and_validate(tipo_producto: TipoProducto, uploaded_file, dry_run: bool
             raw_data_for_validation,
             tipo_producto,
             marca_index,
-            existing_names,
             expected_dynamic,
         )
 
@@ -325,19 +351,15 @@ def parse_and_validate(tipo_producto: TipoProducto, uploaded_file, dry_run: bool
             })
             continue
 
-        if status == 'ignorado':
-            ignorados.append({
-                'fila': row_idx,
-                'nombre': returned_nombre,
-                'data': data_preview,
-                'motivo': payload['motivo'],
-            })
-            continue
+        producto_existente = existing_index.get(returned_nombre.lower())
 
-        # status == 'creado': dry-run just records, commit also persists
         if not dry_run:
             try:
-                _save_row(payload['producto_data'], payload['dynamic_values'], usuario)
+                if producto_existente:
+                    _update_row(producto_existente, payload['producto_data'], payload['dynamic_values'], usuario)
+                else:
+                    nuevo = _save_row(payload['producto_data'], payload['dynamic_values'], usuario)
+                    existing_index[returned_nombre.lower()] = nuevo
             except Exception as exc:
                 fallidos.append({
                     'fila': row_idx,
@@ -347,8 +369,8 @@ def parse_and_validate(tipo_producto: TipoProducto, uploaded_file, dry_run: bool
                 })
                 continue
 
-        existing_names.add(returned_nombre.lower())
-        creados.append({
+        bucket = actualizados if producto_existente else creados
+        bucket.append({
             'fila': row_idx,
             'nombre': returned_nombre,
             'data': data_preview,
@@ -356,9 +378,9 @@ def parse_and_validate(tipo_producto: TipoProducto, uploaded_file, dry_run: bool
 
     return {
         'dry_run': dry_run,
-        'total': len(creados) + len(ignorados) + len(fallidos),
+        'total': len(creados) + len(actualizados) + len(fallidos),
         'creados': creados,
-        'ignorados': ignorados,
+        'actualizados': actualizados,
         'fallidos': fallidos,
     }
 
@@ -367,21 +389,22 @@ def confirm_edited_rows(tipo_producto: TipoProducto, rows: list, usuario) -> dic
     """
     Persist edited rows coming from the JSON confirm endpoint. Each row should
     be `{ "data": {column: value, ...}, "fila": optional }`. Re-validates so
-    edits cannot bypass the original checks.
+    edits cannot bypass the original checks. Rows whose `nombre` matches an
+    existing Producto are overwritten in place; new names are inserted.
     """
     dynamic_fields = _ordered_dynamic_fields(tipo_producto)
     expected_dynamic = {tpc.campo_producto.nombre: tpc for tpc in dynamic_fields}
     marca_index = _build_marca_index()
-    existing_names = {p.lower() for p in Producto.objects.values_list('nombre', flat=True)}
+    existing_index = {p.nombre.lower(): p for p in Producto.objects.all()}
 
-    creados, ignorados, fallidos = [], [], []
+    creados, actualizados, fallidos = [], [], []
 
     for row in rows or []:
         data = (row or {}).get('data') or {}
         fila = (row or {}).get('fila')
 
         status, nombre, payload = _validate_row(
-            data, tipo_producto, marca_index, existing_names, expected_dynamic
+            data, tipo_producto, marca_index, expected_dynamic
         )
 
         if status == 'fallido':
@@ -393,17 +416,16 @@ def confirm_edited_rows(tipo_producto: TipoProducto, rows: list, usuario) -> dic
             })
             continue
 
-        if status == 'ignorado':
-            ignorados.append({
-                'fila': fila,
-                'nombre': nombre,
-                'data': data,
-                'motivo': payload['motivo'],
-            })
-            continue
+        producto_existente = existing_index.get(nombre.lower())
 
         try:
-            producto = _save_row(payload['producto_data'], payload['dynamic_values'], usuario)
+            if producto_existente:
+                producto = _update_row(producto_existente, payload['producto_data'], payload['dynamic_values'], usuario)
+                bucket = actualizados
+            else:
+                producto = _save_row(payload['producto_data'], payload['dynamic_values'], usuario)
+                existing_index[nombre.lower()] = producto
+                bucket = creados
         except Exception as exc:
             fallidos.append({
                 'fila': fila,
@@ -413,18 +435,17 @@ def confirm_edited_rows(tipo_producto: TipoProducto, rows: list, usuario) -> dic
             })
             continue
 
-        existing_names.add(nombre.lower())
-        creados.append({
+        bucket.append({
             'fila': fila,
             'id': producto.id,
             'nombre': producto.nombre,
             'marca_nombre': producto.marca.name,
-            'imagenes_count': 0,
+            'imagenes_count': producto.imagenes.count(),
         })
 
     return {
-        'total': len(creados) + len(ignorados) + len(fallidos),
+        'total': len(creados) + len(actualizados) + len(fallidos),
         'creados': creados,
-        'ignorados': ignorados,
+        'actualizados': actualizados,
         'fallidos': fallidos,
     }

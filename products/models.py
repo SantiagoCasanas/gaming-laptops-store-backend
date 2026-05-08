@@ -120,6 +120,20 @@ class TipoProductoCampo(models.Model):
         default=False,
         help_text="Define if a field is a filterable attribute (e.g. for faceted search)"
     )
+    mostrar_en_promo = models.BooleanField(
+        default=False,
+        help_text="Whether this field is rendered on the promotional card image for products of this type"
+    )
+    orden_promo = models.PositiveSmallIntegerField(
+        default=0,
+        help_text="Order of this field on the promotional card (top-to-bottom). Only relevant when mostrar_en_promo=True"
+    )
+    icono_slug = models.CharField(
+        max_length=40,
+        blank=True,
+        default='',
+        help_text="Slug of the icon shown next to the value on the promo card (e.g. 'cpu', 'gpu', 'ram'). Maps to /promo-assets/icons/<slug>.svg in the frontend"
+    )
 
     class Meta:
         verbose_name = "Product Type Field"
@@ -138,6 +152,15 @@ class Producto(BaseModel):
     Linked to a brand, a product type, and one or more categories.
     """
     nombre = models.CharField(max_length=255, null=False, help_text="Full product name / model")
+    nombre_base = models.CharField(
+        max_length=120,
+        blank=True,
+        default='',
+        help_text=(
+            "Short version of the name shown on promotional images "
+            "(e.g. 'Acer Predator Helios Neo 16S'). Falls back to `nombre` when empty."
+        ),
+    )
     descripcion = models.TextField(null=False, help_text="Detailed product description (supports long text with formatting)")
     marca = models.ForeignKey(
         Brand,

@@ -607,6 +607,7 @@ class ProductoCreateView(APIView):
 
         data = {
             'nombre': request.data.get('nombre', ''),
+            'nombre_base': request.data.get('nombre_base', ''),
             'descripcion': request.data.get('descripcion', ''),
             'marca': request.data.get('marca'),
             'tipo_producto': request.data.get('tipo_producto'),
@@ -659,6 +660,9 @@ class ProductoUpdateView(APIView):
         data = {}
         if request.data.get('nombre'):
             data['nombre'] = request.data.get('nombre')
+        # nombre_base: include even when empty so the user can clear it
+        if 'nombre_base' in request.data:
+            data['nombre_base'] = request.data.get('nombre_base', '')
         if request.data.get('descripcion'):
             data['descripcion'] = request.data.get('descripcion')
         if request.data.get('marca'):
@@ -1573,3 +1577,231 @@ class ProductoUploadImagenesView(APIView):
             },
             status=status.HTTP_201_CREATED,
         )
+
+
+# ============================================================================
+# Promotional cards — JSON payload for the WhatsApp/Instagram image generator.
+# The frontend renders each unit into a 1080x1080 PNG with html2canvas and zips
+# the batch with JSZip. This view does no rendering — it only assembles the
+# data shape the frontend needs.
+# ============================================================================
+
+import random as _random
+
+
+class PromoCardsDataView(APIView):
+    """
+    GET /products/promo-cards/data/
+
+    Returns the data needed by the frontend to render a ZIP of promotional
+    images for the current saleable inventory. Includes:
+      - One entry per UnidadProducto (active, sin_vender, in stock / traveling
+        / in importer's office) with title, condicion, specs (only the fields
+        flagged mostrar_en_promo on the parent TipoProducto), main image,
+        price, and a delivery label ("Entrega inmediata!" or "Llega aprox. X").
+      - A `portada` block with a 2x2 mosaic of 4 random product photos for
+        the cover image.
+    """
+    permission_classes = [IsAuthenticated]
+
+    # Spanish month names so the cover/header reads "MAYO" instead of relying
+    # on locale.setlocale (which is unreliable on Railway / non-es servers).
+    _MONTHS_ES = [
+        "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO",
+        "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE",
+    ]
+    _MONTHS_ES_FULL = [
+        "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+        "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+    ]
+    _MONTHS_ES_SHORT = [
+        "Ene", "Feb", "Mar", "Abr", "May", "Jun",
+        "Jul", "Ago", "Sep", "Oct", "Nov", "Dic",
+    ]
+
+    def _format_value(self, valor, tipo):
+        """Render a ProductoCampoValor into a human-readable string."""
+        if tipo == "texto":
+            return (valor.valor_texto or "").strip()
+        if tipo == "numero":
+            n = valor.valor_numero
+            if n is None:
+                return ""
+            # Drop trailing zeros for whole numbers but keep decimals when
+            # they exist (e.g. 144 not 144.000000, but 1.5 stays 1.5).
+            if n == n.to_integral_value():
+                return str(int(n))
+            return f"{n.normalize():f}".rstrip("0").rstrip(".")
+        if tipo == "booleano":
+            v = valor.valor_booleano
+            return "Sí" if v else "No"
+        return ""
+
+    def _build_specs(self, producto, promo_campos_by_tipo):
+        """
+        Return the list of {orden_promo, icono_slug, label} for a producto,
+        ordered by orden_promo. `promo_campos_by_tipo` maps
+        tipo_producto_id -> {campo_id: TipoProductoCampo} where the campo is
+        mostrar_en_promo=True. Only those campos appear on the card.
+        """
+        tipo_id = producto.tipo_producto_id
+        promo_map = promo_campos_by_tipo.get(tipo_id, {})
+        if not promo_map:
+            return []
+
+        specs = []
+        for valor in producto.campo_valores.all():
+            tpc = promo_map.get(valor.campo_producto_id)
+            if not tpc:
+                continue
+            label = self._format_value(valor, valor.campo_producto.tipo)
+            if not label:
+                continue
+            specs.append({
+                "orden_promo": tpc.orden_promo,
+                "icono_slug": tpc.icono_slug or "",
+                "label": label,
+            })
+        specs.sort(key=lambda s: (s["orden_promo"], s["label"]))
+        return specs
+
+    def _entrega_label(self, unidad, hoy):
+        """
+        Build the delivery label shown below the specs on the promo card.
+          - en_stock → "¡Entrega inmediata!"
+          - viajando / en_oficina_importadora → "Llega: 22 de Mayo" using
+            fecha_estimada_llegada from the linked OrdenCompra.
+        """
+        estado = unidad.estado_producto
+        if estado == "en_stock":
+            return "¡Entrega inmediata!", None
+
+        # OneToOne reverse from UnidadProducto → OrdenCompra. Defensive
+        # because not every unit was created via an OrdenCompra (older units,
+        # garantías, canjes).
+        eta = None
+        try:
+            eta = unidad.orden_compra.fecha_estimada_llegada
+        except Exception:
+            eta = None
+
+        if eta and eta >= hoy:
+            month_name = self._MONTHS_ES_FULL[eta.month - 1]
+            return f"Llega: {eta.day} de {month_name}", eta.isoformat()
+        return "¡Llega pronto!", None
+
+    def _imagen_principal(self, producto, request):
+        """Absolute URL of the producto's first image (lowest orden), or None."""
+        # `imagenes` is prefetched and ordered by orden ascending implicitly
+        # by id; sort defensively.
+        imgs = sorted(
+            (i for i in producto.imagenes.all() if i.active and i.url),
+            key=lambda i: (i.orden or 0, i.id),
+        )
+        if not imgs:
+            return None
+        try:
+            return request.build_absolute_uri(imgs[0].url.url)
+        except Exception:
+            return None
+
+    def get(self, request):
+        from .models import TipoProductoCampo, ImagenProducto
+
+        hoy = timezone.localdate()
+
+        unidades_qs = (
+            UnidadProducto.objects
+            .filter(
+                active=True,
+                estado_venta="sin_vender",
+                estado_producto__in=["en_stock", "viajando", "en_oficina_importadora"],
+            )
+            .select_related(
+                "producto",
+                "producto__marca",
+                "producto__tipo_producto",
+                "orden_compra",
+            )
+            .prefetch_related(
+                "producto__campo_valores__campo_producto",
+                "producto__imagenes",
+            )
+            .order_by("producto__marca__name", "producto__nombre", "id")
+        )
+
+        # Map: tipo_producto_id -> {campo_producto_id: TipoProductoCampo} for
+        # campos flagged mostrar_en_promo=True. Built with a single query so
+        # the per-unit loop doesn't re-hit the DB.
+        promo_associations = (
+            TipoProductoCampo.objects
+            .filter(mostrar_en_promo=True)
+            .select_related("campo_producto")
+        )
+        promo_campos_by_tipo: dict[int, dict[int, TipoProductoCampo]] = {}
+        for tpc in promo_associations:
+            promo_campos_by_tipo.setdefault(tpc.tipo_producto_id, {})[tpc.campo_producto_id] = tpc
+
+        condicion_labels = {
+            "nuevo": "NUEVO",
+            "open_box": "OPEN BOX",
+            "refurbished": "REFURBISHED",
+            "usado": "USADO",
+        }
+
+        unidades = []
+        for u in unidades_qs:
+            producto = u.producto
+            entrega_label, eta_iso = self._entrega_label(u, hoy)
+            unidades.append({
+                "id": u.id,
+                "producto_id": producto.id,
+                "producto_nombre": (producto.nombre_base or producto.nombre),
+                "producto_nombre_completo": producto.nombre,
+                "producto_descripcion": producto.descripcion or "",
+                "marca_nombre": producto.marca.name if producto.marca else "",
+                "tipo_producto_nombre": producto.tipo_producto.nombre if producto.tipo_producto else "",
+                "condicion": u.condicion,
+                "condicion_label": condicion_labels.get(u.condicion, u.condicion.upper()),
+                "estado_producto": u.estado_producto,
+                "entrega_label": entrega_label,
+                "fecha_estimada_llegada": eta_iso,
+                "precio": int(u.precio) if u.precio is not None else 0,
+                "imagen_principal_url": self._imagen_principal(producto, request),
+                "specs": self._build_specs(producto, promo_campos_by_tipo),
+            })
+
+        # Cover mosaic: 4 random product photos from the same inventory set.
+        # Dedupe by producto_id so we don't show the same model 4 times.
+        seen = set()
+        candidate_urls = []
+        for u_data in unidades:
+            pid = u_data["producto_id"]
+            url = u_data["imagen_principal_url"]
+            if not url or pid in seen:
+                continue
+            seen.add(pid)
+            candidate_urls.append(url)
+
+        if len(candidate_urls) >= 4:
+            mosaico = _random.sample(candidate_urls, 4)
+        elif candidate_urls:
+            # Pad with random repeats so the mosaic always has 4 cells.
+            mosaico = candidate_urls + _random.choices(candidate_urls, k=4 - len(candidate_urls))
+        else:
+            mosaico = []
+
+        mes_label = self._MONTHS_ES[hoy.month - 1]
+
+        return Response({
+            "mes": mes_label,
+            "ano": hoy.year,
+            "total_unidades": len(unidades),
+            "unidades": unidades,
+            "portada": {
+                "titulo": f"CATÁLOGO PATECNOLOGICOS PROMOCIONES {mes_label}",
+                "fotos_mosaico": mosaico,
+                "instagram": "patecnologicos",
+                "whatsapp": "3012661811",
+            },
+        }, status=status.HTTP_200_OK)
