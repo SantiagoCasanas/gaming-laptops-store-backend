@@ -43,6 +43,7 @@ vine==5.1.0
 wcwidth==0.6.0
 whitenoise==6.11.0
 openpyxl==3.1.5
+python-telegram-bot>=21,<22
 
 # Test deps (dev only)
 pytest==8.3.3

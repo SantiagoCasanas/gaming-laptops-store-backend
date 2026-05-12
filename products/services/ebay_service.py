@@ -36,7 +36,9 @@ def get_ebay_access_token():
         "Authorization": f"Basic {encoded_credentials}",
         "Content-Type": "application/x-www-form-urlencoded",
     }
-    data = {"grant_type": "client_credentials", "scope": "https://api.ebay.com/oauth/api_scope/buy.item.feed"}
+    # Public Browse API requires only the base api_scope. The buy.item.feed
+    # scope needs explicit eBay approval and our app does not have it.
+    data = {"grant_type": "client_credentials", "scope": "https://api.ebay.com/oauth/api_scope"}
 
     try:
         response = requests.post(url, headers=headers, data=data, timeout=10)
