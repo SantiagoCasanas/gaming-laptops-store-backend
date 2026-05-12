@@ -54,6 +54,7 @@ from .views import (
     CargueMasivoView,
     ConfirmarCargueMasivoView,
     ProductoUploadImagenesView,
+    PromoCardsDataView,
 )
 
 urlpatterns = [
@@ -126,6 +127,9 @@ urlpatterns = [
     path('cargue-masivo/', CargueMasivoView.as_view(), name='cargue_masivo'),
     path('cargue-masivo/confirmar/', ConfirmarCargueMasivoView.as_view(), name='cargue_masivo_confirmar'),
     path('productos/<int:pk>/imagenes/upload/', ProductoUploadImagenesView.as_view(), name='producto_imagenes_upload'),
+
+    # Promo cards data (frontend renders the actual images with html2canvas)
+    path('promo-cards/data/', PromoCardsDataView.as_view(), name='promo_cards_data'),
 
     # Método aliado endpoints
     path('metodo-aliado/list/', MetodoAliadoListView.as_view(), name='metodo_aliado_list'),

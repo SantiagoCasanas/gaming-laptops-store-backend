@@ -66,10 +66,17 @@ class TipoProductoCampoWriteSerializer(serializers.Serializer):
     Accepts the CampoProducto id, an optional display order, and a required flag.
     The required flag is stored on the association (TipoProductoCampo), not on the
     field itself, implementing Option B (per-association required constraint).
+
+    Promo card configuration (mostrar_en_promo, orden_promo, icono_slug) is also
+    stored per-association so the same CampoProducto can be on the promo card of
+    one TipoProducto and not on another's.
     """
     id = serializers.IntegerField()
     orden = serializers.IntegerField(default=0)
     required = serializers.BooleanField(default=False)
+    mostrar_en_promo = serializers.BooleanField(default=False, required=False)
+    orden_promo = serializers.IntegerField(default=0, required=False)
+    icono_slug = serializers.CharField(default='', required=False, allow_blank=True, max_length=40)
 
 
 class TipoProductoCreateSerializer(serializers.ModelSerializer):
@@ -113,6 +120,9 @@ class TipoProductoCreateSerializer(serializers.ModelSerializer):
                         campo_producto_id=field_data['id'],
                         orden=field_data.get('orden', 0),
                         required=field_data.get('required', False),
+                        mostrar_en_promo=field_data.get('mostrar_en_promo', False),
+                        orden_promo=field_data.get('orden_promo', 0),
+                        icono_slug=field_data.get('icono_slug', ''),
                     )
 
         return tipo_producto
@@ -164,6 +174,9 @@ class TipoProductoUpdateSerializer(serializers.ModelSerializer):
                         campo_producto_id=field_data['id'],
                         orden=field_data.get('orden', 0),
                         required=field_data.get('required', False),
+                        mostrar_en_promo=field_data.get('mostrar_en_promo', False),
+                        orden_promo=field_data.get('orden_promo', 0),
+                        icono_slug=field_data.get('icono_slug', ''),
                     )
 
         return instance
@@ -242,7 +255,10 @@ class TipoProductoCampoSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = TipoProductoCampo
-        fields = ['id', 'campo_producto', 'campo_nombre', 'campo_tipo', 'campo_tipo_display', 'required', 'orden']
+        fields = [
+            'id', 'campo_producto', 'campo_nombre', 'campo_tipo', 'campo_tipo_display',
+            'required', 'orden', 'mostrar_en_promo', 'orden_promo', 'icono_slug',
+        ]
 
 
 class TipoProductoDetailSerializer(serializers.ModelSerializer):
@@ -361,7 +377,7 @@ class ProductoSerializer(serializers.ModelSerializer):
     class Meta:
         model = Producto
         fields = [
-            'id', 'nombre', 'descripcion', 'active',
+            'id', 'nombre', 'nombre_base', 'descripcion', 'active',
             'marca', 'marca_nombre',
             'tipo_producto', 'tipo_producto_nombre',
             'campo_valores', 'imagenes',
@@ -385,6 +401,7 @@ class ProductoCreateSerializer(serializers.Serializer):
     (passed through request.FILES as image_0, image_1, …, image_9).
     """
     nombre = serializers.CharField(max_length=255)
+    nombre_base = serializers.CharField(max_length=120, required=False, allow_blank=True, default='')
     descripcion = serializers.CharField()
     marca = serializers.PrimaryKeyRelatedField(queryset=Brand.objects.all())
     tipo_producto = serializers.PrimaryKeyRelatedField(queryset=TipoProducto.objects.all())
@@ -448,6 +465,7 @@ class ProductoCreateSerializer(serializers.Serializer):
         # Create the Producto
         producto = Producto.objects.create(
             nombre=validated_data['nombre'],
+            nombre_base=validated_data.get('nombre_base', '') or '',
             descripcion=validated_data['descripcion'],
             marca=validated_data['marca'],
             tipo_producto=tipo_producto,
@@ -507,6 +525,7 @@ class ProductoUpdateSerializer(serializers.Serializer):
     Images are updated via remove_images (list of IDs) and new image_N files.
     """
     nombre = serializers.CharField(max_length=255, required=False)
+    nombre_base = serializers.CharField(max_length=120, required=False, allow_blank=True)
     descripcion = serializers.CharField(required=False)
     marca = serializers.PrimaryKeyRelatedField(queryset=Brand.objects.all(), required=False)
     tipo_producto = serializers.PrimaryKeyRelatedField(queryset=TipoProducto.objects.all(), required=False)
@@ -570,6 +589,8 @@ class ProductoUpdateSerializer(serializers.Serializer):
         # --- Base fields ---
         if 'nombre' in validated_data:
             instance.nombre = validated_data['nombre']
+        if 'nombre_base' in validated_data:
+            instance.nombre_base = validated_data['nombre_base'] or ''
         if 'descripcion' in validated_data:
             instance.descripcion = validated_data['descripcion']
         if 'marca' in validated_data:
