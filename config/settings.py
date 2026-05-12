@@ -68,6 +68,7 @@ INSTALLED_APPS = [
     'sales',
     'purchases',
     'dashboard',
+    'deal_watcher',
 ]
 
 MIDDLEWARE = [
@@ -239,6 +240,10 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'products.tasks.actualizar_precios_bajo_pedido',
         'schedule': crontab(minute='*/30'),
     },
+    'deal-watcher-check-deals-cada-30-min': {
+        'task': 'deal_watcher.tasks.check_deals',
+        'schedule': crontab(minute='*/30'),
+    },
 }
 
 # Redis Cache
@@ -258,3 +263,9 @@ EBAY_TOKEN_CACHE_TIMEOUT = 7000
 EBAY_MARKUP_FACTOR = float(os.getenv('EBAY_MARKUP_FACTOR', '1.2'))
 EBAY_FIXED_COST_USD = float(os.getenv('EBAY_FIXED_COST_USD', '50'))
 EBAY_PRECIO_REDONDEO_COP = int(os.getenv('EBAY_PRECIO_REDONDEO_COP', '90000'))
+
+# Deal Watcher
+TRM_CACHE_TTL_SECONDS = int(os.getenv('TRM_CACHE_TTL_SECONDS', '21600'))  # 6 h
+NOTIFICATION_COOLDOWN_HOURS = int(os.getenv('NOTIFICATION_COOLDOWN_HOURS', '6'))
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '')
+TELEGRAM_WEBHOOK_SECRET = os.getenv('TELEGRAM_WEBHOOK_SECRET', '')
