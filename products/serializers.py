@@ -193,20 +193,19 @@ class CampoProductoSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = CampoProducto
-        fields = ['id', 'nombre', 'tipo', 'tipo_display', 'required', 'active']
+        fields = ['id', 'nombre', 'tipo', 'tipo_display', 'active']
 
 
 class CampoProductoCreateSerializer(serializers.ModelSerializer):
     """
     Serializer for creating a new product field.
-    Includes the optional 'required' flag.
+    The 'required' flag is per-association (TipoProductoCampo), not on the field.
     """
     class Meta:
         model = CampoProducto
-        fields = ['nombre', 'tipo', 'required']
+        fields = ['nombre', 'tipo']
         extra_kwargs = {
             'tipo': {'required': True},
-            'required': {'required': False},
         }
 
     def create(self, validated_data):
@@ -218,22 +217,21 @@ class CampoProductoCreateSerializer(serializers.ModelSerializer):
 class CampoProductoUpdateSerializer(serializers.ModelSerializer):
     """
     Serializer for updating product field information.
-    Allows modification of nombre, tipo, and required.
+    Allows modification of nombre and tipo. The 'required' flag is
+    per-association (TipoProductoCampo), not on the field itself.
     """
     class Meta:
         model = CampoProducto
-        fields = ['nombre', 'tipo', 'required']
+        fields = ['nombre', 'tipo']
         extra_kwargs = {
             'nombre': {'required': False},
             'tipo': {'required': False},
-            'required': {'required': False},
         }
 
     def update(self, instance, validated_data):
         """Update and return the field instance."""
         instance.nombre = validated_data.get('nombre', instance.nombre)
         instance.tipo = validated_data.get('tipo', instance.tipo)
-        instance.required = validated_data.get('required', instance.required)
         instance.save()
         return instance
 
