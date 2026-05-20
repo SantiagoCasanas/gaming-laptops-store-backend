@@ -1,0 +1,13 @@
+# Servicio Railway Cron — reemplaza a `worker`, `beat` y `Redis`.
+# Arranca, corre las tareas de eBay, y se apaga. Solo factura los segundos
+# que tarda cada corrida (≈3 corridas/día).
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "python manage.py correr_tareas_programadas"
+# Railway corre el cron en UTC. Colombia es UTC-5.
+# 00:00 / 12:00 / 18:00 UTC  =  7pm / 7am / 1pm hora Colombia.
+cronSchedule = "0 0,12,18 * * *"
+# El servicio NO debe reiniciarse al terminar: un cron termina y se apaga.
+restartPolicyType = "never"

@@ -292,6 +292,75 @@ class NotificationPauseListView(ListAPIView):
 
 
 # ---------------------------------------------------------------------------
+# On-demand check
+# ---------------------------------------------------------------------------
+
+class RunChecksNowView(APIView):
+    """POST /deal-watcher/run-now/ — ejecuta on-demand, de forma síncrona, las
+    dos verificaciones que normalmente corre el Railway Cron:
+
+      1. Actualización de precios de productos Bajo Pedido (eBay).
+      2. Pasada del Deal Watcher (revisa todos los productos vigilados y
+         notifica por Telegram si hay oferta).
+
+    Pensado para pruebas: el mismo trabajo del cron, pero al instante.
+
+    Query param opcional `?dry_run=true` → corre el Deal Watcher sin enviar
+    notificaciones ni escribir el cooldown.
+
+    Es una petición síncrona: hace llamadas a la API de eBay para cada
+    producto, así que puede tardar varios segundos.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        dry_run = str(request.query_params.get('dry_run', '')).lower() in ('1', 'true', 'yes')
+
+        # 1. Precios Bajo Pedido --------------------------------------------
+        bajo_pedido_result = None
+        bajo_pedido_error = None
+        try:
+            from products.tasks import actualizar_precios_bajo_pedido
+            # .apply() corre el shared_task síncrono, en este proceso, sin broker.
+            bajo_pedido_result = actualizar_precios_bajo_pedido.apply().get()
+        except Exception as exc:  # noqa: BLE001 - una falla no debe tumbar la otra
+            logger.exception("run-now: fallo en actualizar_precios_bajo_pedido")
+            bajo_pedido_error = str(exc)
+
+        # 2. Deal Watcher ---------------------------------------------------
+        deal_watcher_result = None
+        deal_watcher_error = None
+        try:
+            from deal_watcher.services import deal_checker, notifier as notifier_module
+            notifier_callable = None if dry_run else (
+                lambda product, snapshot, outcome: notifier_module.notify(
+                    product, snapshot, outcome
+                )
+            )
+            summary = deal_checker.check_all_active(
+                notifier=notifier_callable, dry_run=dry_run,
+            )
+            deal_watcher_result = {
+                'total': summary.total,
+                'notified': summary.notified,
+                'skipped': summary.skipped,
+                'errors': summary.errors,
+            }
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("run-now: fallo en deal_watcher check")
+            deal_watcher_error = str(exc)
+
+        return Response({
+            'message': 'Verificación on-demand ejecutada' + (' (dry-run)' if dry_run else ''),
+            'dry_run': dry_run,
+            'bajo_pedido': bajo_pedido_result,
+            'bajo_pedido_error': bajo_pedido_error,
+            'deal_watcher': deal_watcher_result,
+            'deal_watcher_error': deal_watcher_error,
+        }, status=status.HTTP_200_OK)
+
+
+# ---------------------------------------------------------------------------
 # TelegramSubscriber (read-only listing)
 # ---------------------------------------------------------------------------
 

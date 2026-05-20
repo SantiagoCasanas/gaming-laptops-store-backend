@@ -1,6 +1,0 @@
-[build]
-builder = "nixpacks"
-
-[deploy]
-startCommand = "celery -A config beat -l info"
-restartPolicyType = "on_failure"

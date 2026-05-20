@@ -246,13 +246,23 @@ CELERY_BEAT_SCHEDULE = {
     },
 }
 
-# Redis Cache
-CACHES = {
-    'default': {
-        'BACKEND': 'django.core.cache.backends.redis.RedisCache',
-        'LOCATION': os.getenv('REDIS_URL', 'redis://localhost:6379/0'),
+# Cache — usa Redis si REDIS_URL está definido; si no, caché en memoria local.
+# En producción ya no hay servicio Redis (las tareas corren vía Railway Cron),
+# así que cae a LocMemCache. El único efecto es que el token de eBay se vuelve
+# a pedir en cada corrida del cron — un request extra, inofensivo.
+if os.getenv('REDIS_URL'):
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'LOCATION': os.getenv('REDIS_URL'),
+        }
     }
-}
+else:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        }
+    }
 
 # eBay API Configuration
 EBAY_CLIENT_ID = os.getenv('EBAY_CLIENT_ID', '')

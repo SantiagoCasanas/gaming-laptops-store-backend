@@ -12,6 +12,7 @@ from .views import (
     MonitoredProductListView,
     MonitoredProductUpdateView,
     NotificationPauseListView,
+    RunChecksNowView,
     TelegramSubscriberDeactivateView,
     TelegramSubscriberListView,
     TelegramWebhookView,
@@ -45,6 +46,9 @@ urlpatterns = [
     path('pauses/global/status/', GlobalPauseStatusView.as_view(), name='dw-pause-status'),
     path('pauses/global/create/', GlobalPauseCreateView.as_view(), name='dw-pause-create'),
     path('pauses/global/lift/', GlobalPauseLiftView.as_view(), name='dw-pause-lift'),
+
+    # On-demand check (botón de pruebas)
+    path('run-now/', RunChecksNowView.as_view(), name='dw-run-now'),
 
     # Telegram subscribers
     path('telegram-subscribers/list/', TelegramSubscriberListView.as_view(), name='dw-tg-subs-list'),
