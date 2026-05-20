@@ -5,7 +5,7 @@ builder = "nixpacks"
 # createsuperuser is wrapped in its own subshell so its failure (e.g. when the
 # superuser already exists) doesn't short-circuit the rest of the chain. The
 # noisy "email already taken" error stays in the logs but is non-fatal.
-startCommand = "python manage.py migrate --no-input && python manage.py collectstatic --no-input && (python manage.py createsuperuser --noinput || true) && gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 2"
+startCommand = "python manage.py migrate --no-input && python manage.py collectstatic --no-input && (python manage.py createsuperuser --noinput || true) && gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 1 --threads 4"
 healthcheckPath = "/api/health/"
 healthcheckTimeout = 300
 restartPolicyType = "on_failure"
