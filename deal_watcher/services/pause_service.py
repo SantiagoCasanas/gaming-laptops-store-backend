@@ -51,6 +51,17 @@ def get_active_global_pause(now: Optional[datetime] = None) -> Optional[Notifica
     )
 
 
+def get_active_product_pauses(now: Optional[datetime] = None):
+    """Active per-product pauses, newest first, with `monitored_product` preloaded."""
+    now = now or timezone.now()
+    return (
+        NotificationPause.objects
+        .filter(_active_pause_filter(now), scope=NotificationPause.SCOPE_PRODUCT)
+        .select_related('monitored_product')
+        .order_by('-created_at')
+    )
+
+
 def create_global_pause(
     *,
     paused_until: Optional[datetime],

@@ -8,7 +8,9 @@ rest of the codebase stays synchronous. We do NOT spin up an Application or
 Updater; webhook updates are received as plain JSON via `views.TelegramWebhookView`.
 
 Callback data scheme (kept short — Telegram caps payload at 64 bytes):
-    dw:gpause:<duration>
+    dw:gpause:<duration>                → pause ALL notifications (global)
+    dw:ppause:<product_id>:<duration>   → pause a single product
+    dw:presume:<product_id>             → resume a single product
 where duration ∈ {30m, 1h, 3h, 12h, 1d, inf}.
 """
 from __future__ import annotations
@@ -29,7 +31,9 @@ from telegram.error import TelegramError
 logger = logging.getLogger(__name__)
 
 
-CALLBACK_PREFIX = 'dw:gpause:'
+CALLBACK_PREFIX = 'dw:gpause:'           # global pause:        dw:gpause:<code>
+PRODUCT_PAUSE_PREFIX = 'dw:ppause:'      # per-product pause:   dw:ppause:<id>:<code>
+PRODUCT_RESUME_PREFIX = 'dw:presume:'    # per-product resume:  dw:presume:<id>
 
 
 # Order matches the layout the operator will see (2 rows of 3).
@@ -78,7 +82,7 @@ def send_deal_alert_telegram(product, snapshot, outcome) -> int:
         return 0
 
     text = build_message_text(product, snapshot, outcome)
-    keyboard = build_pause_keyboard()
+    keyboard = build_product_pause_keyboard(product.pk)
     bot = Bot(token=token)
 
     sent = 0
@@ -93,15 +97,20 @@ def send_deal_alert_telegram(product, snapshot, outcome) -> int:
     return sent
 
 
-def send_plain_message(chat_id: str, text: str, parse_mode: Optional[str] = 'HTML') -> bool:
-    """Send a plain message to a single chat. Used by the webhook for replies."""
+def send_plain_message(
+    chat_id: str,
+    text: str,
+    parse_mode: Optional[str] = 'HTML',
+    reply_markup: Optional[InlineKeyboardMarkup] = None,
+) -> bool:
+    """Send a message to a single chat (optionally with inline buttons). Used by the webhook for replies."""
     token = getattr(settings, 'TELEGRAM_BOT_TOKEN', '')
     if not token:
         logger.warning("TELEGRAM_BOT_TOKEN not configured — cannot reply")
         return False
     bot = Bot(token=token)
     try:
-        asyncio.run(_send_message(bot, chat_id, text, reply_markup=None, parse_mode=parse_mode))
+        asyncio.run(_send_message(bot, chat_id, text, reply_markup=reply_markup, parse_mode=parse_mode))
         return True
     except Exception as exc:
         logger.warning("Telegram reply failed for chat %s: %s", chat_id, exc)
@@ -131,6 +140,7 @@ def answer_callback_query(callback_query_id: str, text: str = '', show_alert: bo
 # ---------------------------------------------------------------------------
 
 def build_pause_keyboard() -> InlineKeyboardMarkup:
+    """Global pause keyboard (pauses ALL notifications). Used by the /pausar command."""
     rows = []
     for row in PAUSE_BUTTONS:
         rows.append([
@@ -138,6 +148,30 @@ def build_pause_keyboard() -> InlineKeyboardMarkup:
             for code, label, _ in row
         ])
     return InlineKeyboardMarkup(rows)
+
+
+def build_product_pause_keyboard(product_id) -> InlineKeyboardMarkup:
+    """Per-product pause keyboard attached to each deal alert; pauses only `product_id`."""
+    rows = []
+    for row in PAUSE_BUTTONS:
+        rows.append([
+            InlineKeyboardButton(
+                text=label,
+                callback_data=f"{PRODUCT_PAUSE_PREFIX}{product_id}:{code}",
+            )
+            for code, label, _ in row
+        ])
+    return InlineKeyboardMarkup(rows)
+
+
+def build_product_resume_keyboard(product_id) -> InlineKeyboardMarkup:
+    """Single 'resume' button for the confirmation message after a product is paused."""
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(
+            text='▶️ Reanudar este producto',
+            callback_data=f"{PRODUCT_RESUME_PREFIX}{product_id}",
+        )
+    ]])
 
 
 def build_message_text(product, snapshot, outcome) -> str:
@@ -186,6 +220,41 @@ def parse_pause_callback(callback_data: str) -> Optional[timedelta]:
     if code not in DURATION_BY_CODE:
         raise ValueError(f"Unknown pause code: {code!r}")
     return DURATION_BY_CODE[code]
+
+
+def is_product_pause_callback(callback_data: Optional[str]) -> bool:
+    return bool(callback_data) and callback_data.startswith(PRODUCT_PAUSE_PREFIX)
+
+
+def parse_product_pause_callback(callback_data: str) -> tuple[int, Optional[timedelta]]:
+    """
+    Translate a per-product pause callback to `(product_id, timedelta | None)`.
+
+    `None` means indefinite. Raises `ValueError` if the prefix is missing, the
+    payload is malformed, or the duration code is unknown.
+    """
+    if not is_product_pause_callback(callback_data):
+        raise ValueError(f"Not a product pause callback: {callback_data!r}")
+    rest = callback_data[len(PRODUCT_PAUSE_PREFIX):]  # "<id>:<code>"
+    try:
+        id_str, code = rest.split(':', 1)
+        product_id = int(id_str)
+    except ValueError as exc:
+        raise ValueError(f"Malformed product pause callback: {callback_data!r}") from exc
+    if code not in DURATION_BY_CODE:
+        raise ValueError(f"Unknown pause code: {code!r}")
+    return product_id, DURATION_BY_CODE[code]
+
+
+def is_product_resume_callback(callback_data: Optional[str]) -> bool:
+    return bool(callback_data) and callback_data.startswith(PRODUCT_RESUME_PREFIX)
+
+
+def parse_product_resume_callback(callback_data: str) -> int:
+    """Return the `product_id` from a resume callback. Raises `ValueError` if malformed."""
+    if not is_product_resume_callback(callback_data):
+        raise ValueError(f"Not a product resume callback: {callback_data!r}")
+    return int(callback_data[len(PRODUCT_RESUME_PREFIX):])
 
 
 # ---------------------------------------------------------------------------

@@ -93,6 +93,54 @@ def test_build_pause_keyboard_has_six_buttons():
     assert codes == {f"dw:gpause:{c}" for c in ['30m', '1h', '3h', '12h', '1d', 'inf']}
 
 
+def test_build_product_pause_keyboard_embeds_product_id():
+    kb = tg.build_product_pause_keyboard(42)
+    rows = kb.inline_keyboard
+    assert len(rows) == 2
+    assert all(len(r) == 3 for r in rows)
+    codes = {btn.callback_data for r in rows for btn in r}
+    assert codes == {f"dw:ppause:42:{c}" for c in ['30m', '1h', '3h', '12h', '1d', 'inf']}
+
+
+def test_build_product_resume_keyboard():
+    kb = tg.build_product_resume_keyboard(42)
+    rows = kb.inline_keyboard
+    assert len(rows) == 1 and len(rows[0]) == 1
+    assert rows[0][0].callback_data == 'dw:presume:42'
+
+
+def test_is_product_pause_callback():
+    assert tg.is_product_pause_callback('dw:ppause:42:30m')
+    assert not tg.is_product_pause_callback('dw:gpause:30m')
+    assert not tg.is_product_pause_callback('dw:presume:42')
+    assert not tg.is_product_pause_callback(None)
+
+
+def test_parse_product_pause_callback_codes():
+    assert tg.parse_product_pause_callback('dw:ppause:42:30m') == (42, timedelta(minutes=30))
+    assert tg.parse_product_pause_callback('dw:ppause:7:1h') == (7, timedelta(hours=1))
+    assert tg.parse_product_pause_callback('dw:ppause:99:inf') == (99, None)
+
+
+def test_parse_product_pause_callback_rejects_bad_input():
+    with pytest.raises(ValueError):
+        tg.parse_product_pause_callback('dw:ppause:42:zzz')   # bad code
+    with pytest.raises(ValueError):
+        tg.parse_product_pause_callback('dw:ppause:abc:1h')   # non-int id
+    with pytest.raises(ValueError):
+        tg.parse_product_pause_callback('dw:ppause:42')       # missing code
+    with pytest.raises(ValueError):
+        tg.parse_product_pause_callback('dw:gpause:30m')      # wrong prefix
+
+
+def test_parse_product_resume_callback():
+    assert tg.parse_product_resume_callback('dw:presume:42') == 42
+    with pytest.raises(ValueError):
+        tg.parse_product_resume_callback('dw:presume:abc')
+    with pytest.raises(ValueError):
+        tg.parse_product_resume_callback('dw:gpause:30m')
+
+
 # ---------------------------------------------------------------------------
 # Send paths (Bot mocked)
 # ---------------------------------------------------------------------------

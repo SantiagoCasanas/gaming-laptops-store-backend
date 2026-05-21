@@ -8,6 +8,7 @@ standard DRF admin API used by the React frontend.
 from __future__ import annotations
 
 import hmac
+import html
 import logging
 from datetime import timedelta
 
@@ -426,8 +427,10 @@ _COMMANDS_HELP = (
     "Comandos disponibles:\n"
     "• /start — activar alertas en este chat\n"
     "• /stop — desactivar alertas en este chat\n"
-    "• /estado — ver estado de pausas\n"
-    "• /reanudar — quitar pausa global"
+    "• /estado — ver estado de pausas (global y por producto)\n"
+    "• /pausar — pausar TODAS las notificaciones (global)\n"
+    "• /reanudar — quitar la pausa global\n\n"
+    "Para pausar un producto puntual, usa los botones de su alerta."
 )
 
 
@@ -454,6 +457,8 @@ def _handle_message(message: dict) -> None:
         _cmd_stop(chat_id)
     elif command == '/estado':
         _cmd_estado(chat_id)
+    elif command == '/pausar':
+        _cmd_pausar(chat_id)
     elif command == '/reanudar':
         _cmd_reanudar(chat_id)
     elif command == '/help':
@@ -491,15 +496,37 @@ def _cmd_stop(chat_id: str) -> None:
 
 
 def _cmd_estado(chat_id: str) -> None:
-    pause = pause_service.get_active_global_pause()
-    if pause is None:
-        tg.send_plain_message(chat_id, "🟢 No hay pausa global activa.")
-        return
-    if pause.paused_until is None:
-        tg.send_plain_message(chat_id, "🔴 Pausa global activa: <b>indefinida</b>. Usa /reanudar para levantarla.")
+    lines: list[str] = []
+
+    gpause = pause_service.get_active_global_pause()
+    if gpause is None:
+        lines.append("🟢 No hay pausa global activa.")
+    elif gpause.paused_until is None:
+        lines.append("🔴 Pausa global activa: <b>indefinida</b>. Usa /reanudar para levantarla.")
     else:
-        until = timezone.localtime(pause.paused_until).strftime('%Y-%m-%d %H:%M')
-        tg.send_plain_message(chat_id, f"🔴 Pausa global activa hasta <b>{until}</b>. Usa /reanudar para levantarla.")
+        until = timezone.localtime(gpause.paused_until).strftime('%Y-%m-%d %H:%M')
+        lines.append(f"🔴 Pausa global activa hasta <b>{until}</b>. Usa /reanudar para levantarla.")
+
+    ppauses = list(pause_service.get_active_product_pauses())
+    if ppauses:
+        lines.append("\n🔕 <b>Productos pausados:</b>")
+        for p in ppauses:
+            name = html.escape(p.monitored_product.nickname) if p.monitored_product else '—'
+            if p.paused_until is None:
+                lines.append(f"• {name}: indefinido")
+            else:
+                until = timezone.localtime(p.paused_until).strftime('%Y-%m-%d %H:%M')
+                lines.append(f"• {name}: hasta {until}")
+
+    tg.send_plain_message(chat_id, "\n".join(lines))
+
+
+def _cmd_pausar(chat_id: str) -> None:
+    tg.send_plain_message(
+        chat_id,
+        "⏸ Pausar <b>TODAS</b> las notificaciones por:",
+        reply_markup=tg.build_pause_keyboard(),
+    )
 
 
 def _cmd_reanudar(chat_id: str) -> None:
@@ -521,10 +548,17 @@ def _handle_callback_query(callback: dict) -> None:
     user = callback.get('from') or {}
     username = user.get('username') or ''
 
-    if not tg.is_pause_callback(data):
+    if tg.is_product_pause_callback(data):
+        _handle_product_pause(callback_id, data, chat_id, username)
+    elif tg.is_product_resume_callback(data):
+        _handle_product_resume(callback_id, data, chat_id)
+    elif tg.is_pause_callback(data):
+        _handle_global_pause(callback_id, data, chat_id, username)
+    else:
         tg.answer_callback_query(callback_id, text="Acción desconocida")
-        return
 
+
+def _handle_global_pause(callback_id: str, data: str, chat_id: str, username: str) -> None:
     try:
         delta = tg.parse_pause_callback(data)
     except ValueError:
@@ -542,6 +576,62 @@ def _handle_callback_query(callback: dict) -> None:
     tg.answer_callback_query(callback_id, text=f"⏸ Pausa global activada: {label}")
     if chat_id:
         tg.send_plain_message(chat_id, f"⏸ Pausa global activada: <b>{label}</b>. Usa /reanudar para levantarla.")
+
+
+def _handle_product_pause(callback_id: str, data: str, chat_id: str, username: str) -> None:
+    try:
+        product_id, delta = tg.parse_product_pause_callback(data)
+    except ValueError:
+        tg.answer_callback_query(callback_id, text="Acción desconocida")
+        return
+
+    product = MonitoredProduct.objects.filter(pk=product_id).first()
+    if product is None:
+        tg.answer_callback_query(callback_id, text="Producto no encontrado")
+        return
+
+    paused_until = (timezone.now() + delta) if delta is not None else None
+    pause_service.create_product_pause(
+        product=product,
+        paused_until=paused_until,
+        reason=f"telegram:{username or chat_id}",
+        created_via=NotificationPause.CREATED_VIA_TELEGRAM,
+    )
+
+    label = _human_label_for_delta(delta)
+    name = html.escape(product.nickname)
+    tg.answer_callback_query(callback_id, text=f"⏸ «{product.nickname}» pausado: {label}")
+    if chat_id:
+        tg.send_plain_message(
+            chat_id,
+            f"⏸ Notificaciones de <b>{name}</b> pausadas: <b>{label}</b>.",
+            reply_markup=tg.build_product_resume_keyboard(product.pk),
+        )
+
+
+def _handle_product_resume(callback_id: str, data: str, chat_id: str) -> None:
+    try:
+        product_id = tg.parse_product_resume_callback(data)
+    except ValueError:
+        tg.answer_callback_query(callback_id, text="Acción desconocida")
+        return
+
+    product = MonitoredProduct.objects.filter(pk=product_id).first()
+    if product is None:
+        tg.answer_callback_query(callback_id, text="Producto no encontrado")
+        return
+
+    n = pause_service.deactivate_active_pauses(
+        scope=NotificationPause.SCOPE_PRODUCT,
+        product=product,
+    )
+    name = html.escape(product.nickname)
+    if n:
+        tg.answer_callback_query(callback_id, text=f"▶️ «{product.nickname}» reanudado")
+        if chat_id:
+            tg.send_plain_message(chat_id, f"▶️ Notificaciones de <b>{name}</b> reanudadas.")
+    else:
+        tg.answer_callback_query(callback_id, text="No había pausa activa para ese producto")
 
 
 def _human_label_for_delta(delta: timedelta | None) -> str:

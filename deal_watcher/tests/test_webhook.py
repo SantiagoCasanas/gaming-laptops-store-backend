@@ -20,6 +20,7 @@ from deal_watcher.models import (
 )
 from deal_watcher.services import pause_service
 from deal_watcher.tests.factories import (
+    MonitoredProductFactory,
     NotificationPauseFactory,
     TelegramSubscriberFactory,
 )
@@ -225,3 +226,104 @@ def test_unknown_callback_does_not_create_pause(client, url, _silence_outbound):
     assert response.status_code == 200
     assert NotificationPause.objects.count() == 0
     _silence_outbound['ack'].assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Per-product pause / resume callbacks
+# ---------------------------------------------------------------------------
+
+def test_product_pause_callback_creates_product_pause(client, url, _silence_outbound):
+    product = MonitoredProductFactory()
+    payload = {
+        'callback_query': {
+            'id': 'cb_p1',
+            'data': f'dw:ppause:{product.pk}:1h',
+            'from': {'username': 'santi'},
+            'message': {'chat': {'id': 1}, 'message_id': 5},
+        }
+    }
+    before = timezone.now()
+    response = client.post(url, data=payload, format='json')
+    assert response.status_code == 200
+
+    pause = NotificationPause.objects.get()
+    assert pause.scope == NotificationPause.SCOPE_PRODUCT
+    assert pause.monitored_product_id == product.pk
+    assert pause.created_via == NotificationPause.CREATED_VIA_TELEGRAM
+    assert abs((pause.paused_until - (before + timedelta(hours=1))).total_seconds()) < 5
+    # Only this product is paused; notifications globally are NOT paused.
+    assert pause_service.is_globally_paused() is False
+    assert pause_service.is_product_paused(product) is True
+    _silence_outbound['ack'].assert_called_once()
+
+
+def test_product_pause_indefinite(client, url):
+    product = MonitoredProductFactory()
+    payload = {
+        'callback_query': {
+            'id': 'cb_p2',
+            'data': f'dw:ppause:{product.pk}:inf',
+            'from': {'username': 'santi'},
+            'message': {'chat': {'id': 1}},
+        }
+    }
+    client.post(url, data=payload, format='json')
+    pause = NotificationPause.objects.get()
+    assert pause.scope == NotificationPause.SCOPE_PRODUCT
+    assert pause.paused_until is None
+
+
+def test_product_pause_unknown_product_creates_nothing(client, url, _silence_outbound):
+    payload = {
+        'callback_query': {
+            'id': 'cb_p3',
+            'data': 'dw:ppause:999999:1h',  # nonexistent product
+            'from': {'username': 'santi'},
+            'message': {'chat': {'id': 1}},
+        }
+    }
+    response = client.post(url, data=payload, format='json')
+    assert response.status_code == 200
+    assert NotificationPause.objects.count() == 0
+    _silence_outbound['ack'].assert_called_once()
+
+
+def test_product_pause_malformed_id_creates_nothing(client, url, _silence_outbound):
+    payload = {
+        'callback_query': {
+            'id': 'cb_p4',
+            'data': 'dw:ppause:abc:1h',  # non-int id
+            'from': {},
+            'message': {'chat': {'id': 1}},
+        }
+    }
+    response = client.post(url, data=payload, format='json')
+    assert response.status_code == 200
+    assert NotificationPause.objects.count() == 0
+    _silence_outbound['ack'].assert_called_once()
+
+
+def test_product_resume_callback_lifts_only_that_product(client, url):
+    paused = MonitoredProductFactory()
+    other = MonitoredProductFactory()
+    NotificationPauseFactory(
+        scope=NotificationPause.SCOPE_PRODUCT, monitored_product=paused, paused_until=None,
+    )
+    NotificationPauseFactory(
+        scope=NotificationPause.SCOPE_PRODUCT, monitored_product=other, paused_until=None,
+    )
+    assert pause_service.is_product_paused(paused) is True
+
+    payload = {
+        'callback_query': {
+            'id': 'cb_p5',
+            'data': f'dw:presume:{paused.pk}',
+            'from': {'username': 'santi'},
+            'message': {'chat': {'id': 1}},
+        }
+    }
+    response = client.post(url, data=payload, format='json')
+    assert response.status_code == 200
+    assert pause_service.is_product_paused(paused) is False
+    # The other product's pause is untouched.
+    assert pause_service.is_product_paused(other) is True
