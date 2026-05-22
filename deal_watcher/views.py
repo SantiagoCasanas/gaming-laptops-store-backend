@@ -34,11 +34,14 @@ from deal_watcher.models import (
     TrustedSeller,
 )
 from deal_watcher.serializers import (
+    ConfiguracionNotificadorSerializer,
+    ConfiguracionNotificadorUpdateSerializer,
     GlobalPauseCreateSerializer,
     GlobalPauseStatusSerializer,
     MonitoredProductCreateSerializer,
     MonitoredProductSerializer,
     MonitoredProductUpdateSerializer,
+    NotificadorStatusSerializer,
     NotificationPauseSerializer,
     PriceCheckSerializer,
     TelegramSubscriberSerializer,
@@ -46,7 +49,7 @@ from deal_watcher.serializers import (
     TrustedSellerSerializer,
     TrustedSellerUpdateSerializer,
 )
-from deal_watcher.services import pause_service
+from deal_watcher.services import pause_service, scheduler_service
 from deal_watcher.services.notifiers import telegram as tg
 
 logger = logging.getLogger(__name__)
@@ -290,6 +293,53 @@ class NotificationPauseListView(ListAPIView):
     serializer_class = NotificationPauseSerializer
     permission_classes = [IsAuthenticated]
     queryset = NotificationPause.objects.all().order_by('-created_at')[:50]
+
+
+# ---------------------------------------------------------------------------
+# Configuración del notificador (franja horaria + presupuesto)
+# ---------------------------------------------------------------------------
+
+class NotificadorConfigDetailView(APIView):
+    """GET /deal-watcher/config/detail/ — configuración actual (singleton)."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        config = scheduler_service.get_config()
+        return Response({
+            'message': 'Configuración del notificador',
+            'config': ConfiguracionNotificadorSerializer(config).data,
+        })
+
+
+class NotificadorConfigUpdateView(APIView):
+    """PUT/PATCH /deal-watcher/config/update/ — actualiza la configuración."""
+    permission_classes = [IsAuthenticated]
+
+    def put(self, request):
+        return self._update(request, partial=False)
+
+    def patch(self, request):
+        return self._update(request, partial=True)
+
+    def _update(self, request, partial):
+        config = scheduler_service.get_config()
+        serializer = ConfiguracionNotificadorUpdateSerializer(
+            config, data=request.data, partial=partial
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response({
+            'message': 'Configuración actualizada',
+            'config': ConfiguracionNotificadorSerializer(config).data,
+        }, status=status.HTTP_200_OK)
+
+
+class NotificadorStatusView(APIView):
+    """GET /deal-watcher/config/status/ — estado en vivo del pacing."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response(NotificadorStatusSerializer(scheduler_service.get_status()).data)
 
 
 # ---------------------------------------------------------------------------

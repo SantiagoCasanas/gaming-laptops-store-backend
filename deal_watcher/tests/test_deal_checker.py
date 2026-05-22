@@ -92,6 +92,46 @@ def test_skips_when_product_paused():
 
 
 # ---------------------------------------------------------------------------
+# api_calls counter (presupuesto del notificador)
+# ---------------------------------------------------------------------------
+
+def test_api_calls_counted_when_ebay_is_hit():
+    MonitoredProductFactory()
+    with _patch_ebay(_payload()), _patch_trm():
+        summary = deal_checker.check_all_active()
+    assert summary.api_calls == 1
+
+
+def test_api_calls_counted_even_on_ebay_error():
+    # Un EBAY_ERROR ya consumió la llamada → debe contar (conservador).
+    MonitoredProductFactory()
+    with _patch_ebay(side_effect=RuntimeError('boom')):
+        summary = deal_checker.check_all_active()
+    assert summary.api_calls == 1
+    assert summary.errors == 1
+
+
+def test_api_calls_zero_when_globally_paused():
+    MonitoredProductFactory()
+    NotificationPauseFactory(scope=NotificationPause.SCOPE_GLOBAL, paused_until=None)
+    with _patch_ebay({}) as ebay_mock:
+        summary = deal_checker.check_all_active()
+    assert summary.api_calls == 0
+    ebay_mock.assert_not_called()
+
+
+def test_api_calls_zero_when_product_paused():
+    product = MonitoredProductFactory()
+    NotificationPauseFactory(
+        scope=NotificationPause.SCOPE_PRODUCT, monitored_product=product, paused_until=None,
+    )
+    with _patch_ebay({}) as ebay_mock:
+        summary = deal_checker.check_all_active()
+    assert summary.api_calls == 0
+    ebay_mock.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # Errors
 # ---------------------------------------------------------------------------
 

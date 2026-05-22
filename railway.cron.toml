@@ -2,15 +2,16 @@
 # Arranca, corre las tareas de eBay, y se apaga. Solo factura los segundos
 # que tarda cada corrida.
 #
-# Notificador (Deal Watcher): corre en CADA tick, cada 8 min.
-# Precios Bajo Pedido: gated dentro del comando (--cron-frecuente) a 3x/día,
-# en el primer tick de las horas 00/12/18 UTC, para no agotar la cuota de eBay.
+# Despierta cada 5 min (mínimo de Railway Cron). En cada tick el comando decide:
+# - Notificador (Deal Watcher): se pacéa con el presupuesto diario repartido en
+#   la franja activa (hora Colombia); la mayoría de ticks son skips rápidos.
+# - Precios Bajo Pedido: gated a 3x/día, primer tick de las horas 00/12/18 UTC.
 [build]
 builder = "nixpacks"
 
 [deploy]
 startCommand = "python manage.py correr_tareas_programadas --cron-frecuente"
-# Cada 8 minutos. El mínimo de Railway Cron es 5 min, así que */8 es válido.
-cronSchedule = "*/8 * * * *"
+# Cada 5 minutos (el mínimo que permite Railway Cron).
+cronSchedule = "*/5 * * * *"
 # El servicio NO debe reiniciarse al terminar: un cron termina y se apaga.
 restartPolicyType = "never"

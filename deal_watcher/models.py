@@ -5,6 +5,8 @@ Tracks eBay listings the operator wants to buy at a target price, the trusted
 sellers we accept, the history of price checks, pause windows that silence
 notifications, and Telegram subscribers that receive alerts.
 """
+from datetime import time
+
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.conf import settings
@@ -292,3 +294,90 @@ class TelegramSubscriber(BaseModel):
 
     def __str__(self):
         return f"{self.telegram_username or self.chat_id}"
+
+
+class ConfiguracionNotificador(BaseModel):
+    """
+    Singleton (pk=1): franja horaria ACTIVA (hora Colombia) + presupuesto diario
+    de llamadas a eBay para el Deal Watcher. `active` (de BaseModel) actúa como
+    'habilitado': si está en False el notificador no corre.
+
+    El comando `correr_tareas_programadas --cron-frecuente` (cron cada 5 min)
+    reparte `llamados_diarios_objetivo` de forma pareja SOLO dentro de la franja
+    [hora_inicio_activa, hora_fin_activa). La franja puede cruzar medianoche
+    (ej. 07:00–01:00). `reserva_otros_llamados` deja un colchón para la tarea de
+    precios Bajo Pedido, que también consume cuota de eBay.
+    """
+    hora_inicio_activa = models.TimeField(
+        default=time(7, 0),
+        help_text="Inicio de la franja activa (hora Colombia, inclusivo).",
+    )
+    hora_fin_activa = models.TimeField(
+        default=time(1, 0),
+        help_text="Fin de la franja activa (hora Colombia, exclusivo). Puede ser menor que el inicio para cruzar medianoche.",
+    )
+    llamados_diarios_objetivo = models.PositiveIntegerField(
+        default=5000,
+        help_text="Presupuesto diario de llamadas a eBay (tope eBay = 5000).",
+    )
+    reserva_otros_llamados = models.PositiveIntegerField(
+        default=200,
+        help_text="Llamadas reservadas para otras tareas (precios Bajo Pedido). Se restan del presupuesto del notificador.",
+    )
+
+    class Meta:
+        verbose_name = "Configuración del Notificador"
+        verbose_name_plural = "Configuración del Notificador"
+
+    def clean(self):
+        super().clean()
+        tope = getattr(settings, 'EBAY_LLAMADOS_DIARIOS_MAX', 5000)
+        if self.llamados_diarios_objetivo > tope:
+            raise ValidationError(
+                {'llamados_diarios_objetivo': f"No puede superar el tope de eBay ({tope})."}
+            )
+        if self.reserva_otros_llamados >= self.llamados_diarios_objetivo:
+            raise ValidationError(
+                {'reserva_otros_llamados': "La reserva debe ser menor que el presupuesto diario."}
+            )
+
+    def __str__(self):
+        return (
+            f"Notif {self.hora_inicio_activa:%H:%M}-{self.hora_fin_activa:%H:%M} "
+            f"budget={self.llamados_diarios_objetivo} reserva={self.reserva_otros_llamados}"
+        )
+
+
+class UsoDiarioNotificador(models.Model):
+    """
+    Contador por 'período de presupuesto' del notificador. `dia` es la fecha
+    (Colombia) del INICIO del período, anclado a `hora_inicio_activa` (NO a
+    medianoche), para que el contador no se reinicie a mitad de franja cuando
+    ésta cruza medianoche. Es telemetría: lo escribe el comando tras cada corrida.
+    """
+    dia = models.DateField(
+        unique=True,
+        db_index=True,
+        help_text="Fecha (Colombia) del inicio del período de presupuesto.",
+    )
+    llamados_usados = models.PositiveIntegerField(
+        default=0,
+        help_text="Llamadas reales a eBay consumidas en el período.",
+    )
+    ciclos_ejecutados = models.PositiveIntegerField(
+        default=0,
+        help_text="Veces que el notificador efectivamente corrió en el período.",
+    )
+    ultima_ejecucion_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Última corrida efectiva del notificador en el período.",
+    )
+
+    class Meta:
+        verbose_name = "Uso Diario del Notificador"
+        verbose_name_plural = "Uso Diario del Notificador"
+        ordering = ['-dia']
+
+    def __str__(self):
+        return f"{self.dia}: {self.llamados_usados} llamadas / {self.ciclos_ejecutados} ciclos"

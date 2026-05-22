@@ -1,10 +1,12 @@
 """factory_boy factories for deal_watcher tests."""
+from datetime import time
 from decimal import Decimal
 
 import factory
 from factory.django import DjangoModelFactory
 
 from deal_watcher.models import (
+    ConfiguracionNotificador,
     MonitoredProduct,
     NotificationPause,
     PriceCheck,
@@ -55,3 +57,13 @@ class TelegramSubscriberFactory(DjangoModelFactory):
 
     chat_id = factory.Sequence(lambda n: f"100{n:06d}")
     telegram_username = factory.Sequence(lambda n: f"user{n}")
+
+
+class ConfiguracionNotificadorFactory(DjangoModelFactory):
+    class Meta:
+        model = ConfiguracionNotificador
+
+    hora_inicio_activa = time(7, 0)
+    hora_fin_activa = time(1, 0)
+    llamados_diarios_objetivo = 5000
+    reserva_otros_llamados = 200

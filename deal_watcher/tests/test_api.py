@@ -8,6 +8,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from deal_watcher.models import (
+    ConfiguracionNotificador,
     MonitoredProduct,
     NotificationPause,
     TrustedSeller,
@@ -269,3 +270,77 @@ def test_subscriber_deactivate(auth_client):
     assert response.status_code == 200
     sub.refresh_from_db()
     assert sub.active is False
+
+
+# ---------------------------------------------------------------------------
+# Configuración del notificador
+# ---------------------------------------------------------------------------
+
+def test_anonymous_cannot_get_config(anon_client):
+    assert anon_client.get(reverse('dw-config-detail')).status_code == 401
+
+
+def test_get_config_creates_singleton_with_defaults(auth_client):
+    assert ConfiguracionNotificador.objects.count() == 0
+    response = auth_client.get(reverse('dw-config-detail'))
+    assert response.status_code == 200
+    cfg = response.data['config']
+    assert cfg['llamados_diarios_objetivo'] == 5000
+    assert cfg['reserva_otros_llamados'] == 200
+    assert ConfiguracionNotificador.objects.count() == 1
+
+
+def test_update_config_valid(auth_client):
+    response = auth_client.put(
+        reverse('dw-config-update'),
+        {
+            'hora_inicio_activa': '08:00',
+            'hora_fin_activa': '23:00',
+            'llamados_diarios_objetivo': 4000,
+            'reserva_otros_llamados': 100,
+            'active': True,
+        },
+        format='json',
+    )
+    assert response.status_code == 200
+    assert response.data['config']['llamados_diarios_objetivo'] == 4000
+    assert ConfiguracionNotificador.objects.get(pk=1).llamados_diarios_objetivo == 4000
+
+
+def test_update_config_rejects_budget_over_max(auth_client):
+    response = auth_client.put(
+        reverse('dw-config-update'),
+        {
+            'hora_inicio_activa': '08:00',
+            'hora_fin_activa': '23:00',
+            'llamados_diarios_objetivo': 99999,
+            'reserva_otros_llamados': 100,
+            'active': True,
+        },
+        format='json',
+    )
+    assert response.status_code == 400
+    assert 'llamados_diarios_objetivo' in response.data
+
+
+def test_update_config_rejects_reserve_ge_budget(auth_client):
+    response = auth_client.put(
+        reverse('dw-config-update'),
+        {
+            'hora_inicio_activa': '08:00',
+            'hora_fin_activa': '23:00',
+            'llamados_diarios_objetivo': 1000,
+            'reserva_otros_llamados': 1000,
+            'active': True,
+        },
+        format='json',
+    )
+    assert response.status_code == 400
+    assert 'reserva_otros_llamados' in response.data
+
+
+def test_config_status_returns_snapshot(auth_client):
+    response = auth_client.get(reverse('dw-config-status'))
+    assert response.status_code == 200
+    for key in ('enabled', 'within_window', 'effective_budget', 'n_products', 'window_label'):
+        assert key in response.data

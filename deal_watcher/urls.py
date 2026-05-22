@@ -11,6 +11,9 @@ from .views import (
     MonitoredProductHistoryView,
     MonitoredProductListView,
     MonitoredProductUpdateView,
+    NotificadorConfigDetailView,
+    NotificadorConfigUpdateView,
+    NotificadorStatusView,
     NotificationPauseListView,
     RunChecksNowView,
     TelegramSubscriberDeactivateView,
@@ -46,6 +49,11 @@ urlpatterns = [
     path('pauses/global/status/', GlobalPauseStatusView.as_view(), name='dw-pause-status'),
     path('pauses/global/create/', GlobalPauseCreateView.as_view(), name='dw-pause-create'),
     path('pauses/global/lift/', GlobalPauseLiftView.as_view(), name='dw-pause-lift'),
+
+    # Configuración del notificador (franja + presupuesto)
+    path('config/detail/', NotificadorConfigDetailView.as_view(), name='dw-config-detail'),
+    path('config/update/', NotificadorConfigUpdateView.as_view(), name='dw-config-update'),
+    path('config/status/', NotificadorStatusView.as_view(), name='dw-config-status'),
 
     # On-demand check (botón de pruebas)
     path('run-now/', RunChecksNowView.as_view(), name='dw-run-now'),

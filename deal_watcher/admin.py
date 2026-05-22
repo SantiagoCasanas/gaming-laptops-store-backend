@@ -6,6 +6,8 @@ from .models import (
     PriceCheck,
     NotificationPause,
     TelegramSubscriber,
+    ConfiguracionNotificador,
+    UsoDiarioNotificador,
 )
 
 
@@ -93,3 +95,27 @@ class TelegramSubscriberAdmin(admin.ModelAdmin):
     list_display = ('chat_id', 'telegram_username', 'active', 'first_seen_at')
     list_filter = ('active',)
     search_fields = ('chat_id', 'telegram_username')
+
+
+@admin.register(ConfiguracionNotificador)
+class ConfiguracionNotificadorAdmin(admin.ModelAdmin):
+    list_display = (
+        'id',
+        'hora_inicio_activa',
+        'hora_fin_activa',
+        'llamados_diarios_objetivo',
+        'reserva_otros_llamados',
+        'active',
+        'updated_at',
+    )
+    readonly_fields = ('created_at', 'updated_at')
+
+
+@admin.register(UsoDiarioNotificador)
+class UsoDiarioNotificadorAdmin(admin.ModelAdmin):
+    list_display = ('dia', 'llamados_usados', 'ciclos_ejecutados', 'ultima_ejecucion_at')
+    date_hierarchy = 'dia'
+    readonly_fields = ('dia', 'llamados_usados', 'ciclos_ejecutados', 'ultima_ejecucion_at')
+
+    def has_add_permission(self, request):
+        return False

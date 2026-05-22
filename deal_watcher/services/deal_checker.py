@@ -77,6 +77,7 @@ class CheckOutcome:
     seller_is_trusted: bool = False
     was_available: bool = False
     price_check_id: Optional[int] = None
+    ebay_call_made: bool = False
 
 
 @dataclass
@@ -85,6 +86,7 @@ class RunSummary:
     notified: int = 0
     skipped: int = 0
     errors: int = 0
+    api_calls: int = 0
     outcomes: list[CheckOutcome] = field(default_factory=list)
 
 
@@ -112,6 +114,8 @@ def check_all_active(
             )
             summary.errors += 1
         summary.total += 1
+        if outcome.ebay_call_made:
+            summary.api_calls += 1
         summary.outcomes.append(outcome)
         if outcome.notified:
             summary.notified += 1
@@ -121,8 +125,8 @@ def check_all_active(
             summary.skipped += 1
 
     logger.info(
-        "Deal Watcher run done: total=%s notified=%s skipped=%s errors=%s (dry_run=%s)",
-        summary.total, summary.notified, summary.skipped, summary.errors, dry_run,
+        "Deal Watcher run done: total=%s notified=%s skipped=%s errors=%s api_calls=%s (dry_run=%s)",
+        summary.total, summary.notified, summary.skipped, summary.errors, summary.api_calls, dry_run,
     )
     return summary
 
@@ -147,7 +151,11 @@ def check_one(
         _write_price_check(product, outcome, was_available=False, error_message='paused: product')
         return outcome
 
-    # 2. Fetch eBay payload
+    # 2. Fetch eBay payload. Marcamos el consumo de cuota EN EL INTENTO (antes del
+    # try): un EBAY_ERROR normalmente ya gastó la llamada, así que contarlo es lo
+    # conservador para el presupuesto. Los productos pausados retornan arriba y
+    # nunca llegan aquí → no consumen cuota.
+    outcome.ebay_call_made = True
     try:
         payload = get_ebay_item_data(product.ebay_item_id)
     except Exception as exc:

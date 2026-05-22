@@ -1,7 +1,9 @@
 """DRF serializers for the Deal Watcher admin API."""
+from django.conf import settings
 from rest_framework import serializers
 
 from .models import (
+    ConfiguracionNotificador,
     MonitoredProduct,
     NotificationPause,
     PriceCheck,
@@ -31,6 +33,69 @@ class TrustedSellerUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = TrustedSeller
         fields = ['username', 'display_name', 'notes']
+
+
+# ---------------------------------------------------------------------------
+# ConfiguracionNotificador (singleton)
+# ---------------------------------------------------------------------------
+
+class ConfiguracionNotificadorSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ConfiguracionNotificador
+        fields = [
+            'id', 'hora_inicio_activa', 'hora_fin_activa',
+            'llamados_diarios_objetivo', 'reserva_otros_llamados',
+            'active', 'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class ConfiguracionNotificadorUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ConfiguracionNotificador
+        fields = [
+            'hora_inicio_activa', 'hora_fin_activa',
+            'llamados_diarios_objetivo', 'reserva_otros_llamados', 'active',
+        ]
+
+    def validate(self, attrs):
+        # Combinar con la instancia para soportar PATCH parcial.
+        objetivo = attrs.get(
+            'llamados_diarios_objetivo',
+            getattr(self.instance, 'llamados_diarios_objetivo', None),
+        )
+        reserva = attrs.get(
+            'reserva_otros_llamados',
+            getattr(self.instance, 'reserva_otros_llamados', None),
+        )
+        tope = getattr(settings, 'EBAY_LLAMADOS_DIARIOS_MAX', 5000)
+        if objetivo is not None and objetivo > tope:
+            raise serializers.ValidationError(
+                {'llamados_diarios_objetivo': f"No puede superar el tope de eBay ({tope})."}
+            )
+        if objetivo is not None and reserva is not None and reserva >= objetivo:
+            raise serializers.ValidationError(
+                {'reserva_otros_llamados': "La reserva debe ser menor que el presupuesto diario."}
+            )
+        return attrs
+
+
+class NotificadorStatusSerializer(serializers.Serializer):
+    """Snapshot read-only del estado del pacing (para la página admin)."""
+    enabled = serializers.BooleanField()
+    within_window = serializers.BooleanField()
+    period = serializers.DateField(allow_null=True)
+    window_label = serializers.CharField()
+    objetivo = serializers.IntegerField()
+    reserva = serializers.IntegerField()
+    effective_budget = serializers.IntegerField()
+    earned = serializers.FloatField()
+    used = serializers.IntegerField()
+    n_products = serializers.IntegerField()
+    cycles_today = serializers.IntegerField()
+    last_run_at = serializers.DateTimeField(allow_null=True)
+    cadencia_estimada_min = serializers.FloatField(allow_null=True)
+    cadencia_efectiva_min = serializers.FloatField(allow_null=True)
 
 
 # ---------------------------------------------------------------------------
