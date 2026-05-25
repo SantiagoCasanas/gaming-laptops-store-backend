@@ -2,11 +2,13 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.generics import ListAPIView, CreateAPIView, UpdateAPIView, RetrieveAPIView
 from rest_framework.views import APIView
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.db import transaction
+from django.db.models import Exists, OuterRef, Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from .models import Brand, TipoProducto, CampoProducto, Proveedor, Producto, Descuento, UnidadProducto, BajoPedido
+from datetime import timedelta
+from .models import Brand, TipoProducto, CampoProducto, Proveedor, Producto, Descuento, UnidadProducto, BajoPedido, SyncBajoPedidoLog
 from .serializers import (
     BrandSerializer,
     BrandCreateSerializer,
@@ -28,6 +30,7 @@ from .serializers import (
     BajoPedidoDetailSerializer,
     BajoPedidoCreateSerializer,
     BajoPedidoUpdateSerializer,
+    SyncBajoPedidoLogSerializer,
     DescuentoSerializer,
     DescuentoCreateSerializer,
     DescuentoUpdateSerializer,
@@ -35,6 +38,8 @@ from .serializers import (
     UnidadProductoCreateSerializer,
     UnidadProductoUpdateSerializer,
     UnidadReparacionSerializer,
+    CatalogProductoSerializer,
+    ESTADOS_PRODUCTO_DISPONIBLES,
 )
 
 
@@ -584,6 +589,96 @@ class ProductoDetailView(RetrieveAPIView):
         return context
 
 
+# ---------------------------------------------------------------------------
+# Public catalog (Hito 6) — PUBLIC, AllowAny. No auth required.
+# ---------------------------------------------------------------------------
+#
+# These views resolve availability + price on the server (see
+# CatalogProductoSerializer) and expose only a safe allowlist of fields.
+# `permission_classes = [AllowAny]` is set explicitly: the project does NOT
+# define a DEFAULT_PERMISSION_CLASSES in settings.REST_FRAMEWORK, so DRF's
+# implicit default is AllowAny anyway, but we make it explicit and safe.
+
+# Prefetch shared by both catalog views: units, listings, images and field
+# values are all pulled up front so the serializer resolves the frontier in
+# Python with no N+1 queries.
+_CATALOG_PREFETCH = (
+    'unidades',
+    'bajo_pedidos',
+    'imagenes',
+    'campo_valores__campo_producto',
+)
+
+
+class PublicCatalogListView(ListAPIView):
+    """
+    Public storefront catalog list.
+
+    GET /products/catalogo/
+    No authentication required (AllowAny).
+    Returns active products that have at least one available unit OR at least
+    one active BajoPedido listing. Each product carries a server-resolved
+    `disponibilidad_catalogo` and `precio`.
+    """
+    serializer_class = CatalogProductoSerializer
+    permission_classes = [AllowAny]
+
+    def get_queryset(self):
+        unidad_disponible = UnidadProducto.objects.filter(
+            producto=OuterRef('pk'),
+            active=True,
+            estado_venta=UnidadProducto.EstadoVentaChoices.SIN_VENDER,
+            estado_producto__in=ESTADOS_PRODUCTO_DISPONIBLES,
+        )
+        listing_activo = BajoPedido.objects.filter(
+            producto=OuterRef('pk'),
+            active=True,
+        )
+        return (
+            Producto.objects.filter(active=True)
+            .select_related('marca', 'tipo_producto')
+            .prefetch_related(*_CATALOG_PREFETCH)
+            .annotate(
+                _tiene_unidad=Exists(unidad_disponible),
+                _tiene_listing=Exists(listing_activo),
+            )
+            .filter(Q(_tiene_unidad=True) | Q(_tiene_listing=True))
+        )
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+
+
+class PublicCatalogDetailView(RetrieveAPIView):
+    """
+    Public storefront catalog detail.
+
+    GET /products/catalogo/<pk>/
+    No authentication required (AllowAny).
+    Returns a single active product by id with server-resolved availability.
+    A product is returned even if it currently has no units nor listings
+    (its `disponibilidad_catalogo` will be 'sin_existencias'); 404 only when
+    the product does not exist or is inactive.
+    """
+    serializer_class = CatalogProductoSerializer
+    permission_classes = [AllowAny]
+    lookup_field = 'pk'
+
+    def get_queryset(self):
+        return (
+            Producto.objects.filter(active=True)
+            .select_related('marca', 'tipo_producto')
+            .prefetch_related(*_CATALOG_PREFETCH)
+        )
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+
+
 class ProductoCreateView(APIView):
     """
     Create a new Producto with images (multipart/form-data).
@@ -911,6 +1006,62 @@ class BajoPedidoDeactivateView(APIView):
             'message': 'Product variant deactivated successfully',
             'variante': BajoPedidoSerializer(variante).data,
         }, status=status.HTTP_200_OK)
+
+
+# ---------------------------------------------------------------------------
+# SyncBajoPedidoLog view (Hito 7 — read-only daily sync telemetry)
+# ---------------------------------------------------------------------------
+
+class SyncBajoPedidoLogListView(ListAPIView):
+    """
+    List the daily Bajo Pedido eBay sync audit log (read-only monitoring).
+
+    GET /products/sync-bajo-pedido/logs/
+    Requires JWT authentication via Bearer token (admin/monitoring only).
+
+    Query params (all optional):
+      - ?bajo_pedido=<int>  filter to a single listing's sync history
+      - ?resultado=<key>    filter by outcome (SyncBajoPedidoLog.ResultadoChoices)
+      - ?dias=<int>         only rows from the last N days (default 30, by
+                            checked_at). Pass ?dias=0 to disable the time window.
+
+    Windowing/cap: the project has no global DRF pagination, so this endpoint
+    bounds the result set itself. It defaults to a 30-day window on `checked_at`
+    and always applies a hard cap of `MAX_ROWS` (newest first) so it never
+    streams years of rows. The response is a plain JSON array (same flat shape
+    as the other products list views, which also return unpaginated arrays).
+    """
+    serializer_class = SyncBajoPedidoLogSerializer
+    permission_classes = [IsAuthenticated]
+
+    DEFAULT_DIAS = 30
+    MAX_ROWS = 500
+
+    def get_queryset(self):
+        queryset = SyncBajoPedidoLog.objects.select_related(
+            'bajo_pedido__producto'
+        ).all()  # Meta.ordering = ['-checked_at']
+
+        bajo_pedido = self.request.query_params.get('bajo_pedido')
+        if bajo_pedido:
+            queryset = queryset.filter(bajo_pedido_id=bajo_pedido)
+
+        resultado = self.request.query_params.get('resultado')
+        if resultado:
+            queryset = queryset.filter(resultado=resultado)
+
+        # Time window (default 30 days; ?dias=0 disables it).
+        dias_raw = self.request.query_params.get('dias')
+        try:
+            dias = int(dias_raw) if dias_raw is not None else self.DEFAULT_DIAS
+        except (TypeError, ValueError):
+            dias = self.DEFAULT_DIAS
+        if dias > 0:
+            cutoff = timezone.now() - timedelta(days=dias)
+            queryset = queryset.filter(checked_at__gte=cutoff)
+
+        # Hard cap so the (unpaginated) response can never explode.
+        return queryset[:self.MAX_ROWS]
 
 
 # ---------------------------------------------------------------------------
@@ -1769,6 +1920,57 @@ class PromoCardsDataView(APIView):
                 "precio": int(u.precio) if u.precio is not None else 0,
                 "imagen_principal_url": self._imagen_principal(producto, request),
                 "specs": self._build_specs(producto, promo_campos_by_tipo),
+            })
+
+        # --- Bajo-pedido listings (no physical stock) ----------------------
+        # Business rule: physical stock wins. A bajo-pedido is advertised ONLY
+        # when the product has NO physical stock — where "stock" means any unit
+        # in stock, traveling, or with a purchase order in progress (the SAME
+        # per-product "has units?" frontier the public catalog uses, the 4
+        # ESTADOS_PRODUCTO_DISPONIBLES). Availability of the bajo-pedido itself
+        # is read from `disponibilidad_ebay` (the sync's truth, what the catalog
+        # shows as "Bajo Pedido") — NOT `estado`, which is manually editable and
+        # can drift. eBay-agotado / never-synced listings are excluded.
+        productos_con_stock = set(
+            UnidadProducto.objects.filter(
+                active=True,
+                estado_venta=UnidadProducto.EstadoVentaChoices.SIN_VENDER,
+                estado_producto__in=ESTADOS_PRODUCTO_DISPONIBLES,
+            ).values_list("producto_id", flat=True)
+        )
+
+        bajo_pedidos_qs = (
+            BajoPedido.objects
+            .filter(active=True, disponibilidad_ebay=BajoPedido.DisponibilidadEbayChoices.DISPONIBLE)
+            .select_related("producto", "producto__marca", "producto__tipo_producto")
+            .prefetch_related(
+                "producto__campo_valores__campo_producto",
+                "producto__imagenes",
+            )
+            .order_by("producto__marca__name", "producto__nombre", "id")
+        )
+
+        for bp in bajo_pedidos_qs:
+            if bp.producto_id in productos_con_stock:
+                continue
+            producto = bp.producto
+            unidades.append({
+                "id": f"bp-{bp.id}",
+                "producto_id": producto.id,
+                "producto_nombre": (producto.nombre_base or producto.nombre),
+                "producto_nombre_completo": producto.nombre,
+                "producto_descripcion": producto.descripcion or "",
+                "marca_nombre": producto.marca.name if producto.marca else "",
+                "tipo_producto_nombre": producto.tipo_producto.nombre if producto.tipo_producto else "",
+                "condicion": bp.condicion,
+                "condicion_label": condicion_labels.get(bp.condicion, bp.condicion.upper()),
+                "estado_producto": "bajo_pedido",
+                "entrega_label": "¡Bajo pedido!",
+                "fecha_estimada_llegada": None,
+                "precio": int(bp.precio) if bp.precio is not None else 0,
+                "imagen_principal_url": self._imagen_principal(producto, request),
+                "specs": self._build_specs(producto, promo_campos_by_tipo),
+                "es_bajo_pedido": True,
             })
 
         # Cover mosaic: 4 random product photos from the same inventory set.

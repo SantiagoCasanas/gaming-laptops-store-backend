@@ -274,6 +274,13 @@ EBAY_MARKUP_FACTOR = float(os.getenv('EBAY_MARKUP_FACTOR', '1.2'))
 EBAY_FIXED_COST_USD = float(os.getenv('EBAY_FIXED_COST_USD', '50'))
 EBAY_PRECIO_REDONDEO_COP = int(os.getenv('EBAY_PRECIO_REDONDEO_COP', '90000'))
 
+# Bajo-Pedido daily price & availability sync
+MARGEN_MINIMO = float(os.getenv('MARGEN_MINIMO', '0.20'))  # min margin (20%) to keep before lowering price
+COSTO_IMPORTACION_FIJO = int(os.getenv('COSTO_IMPORTACION_FIJO', '150000'))  # fixed import cost (COP) per listing
+IMPUESTO_IMPORTACION = float(os.getenv('IMPUESTO_IMPORTACION', '0.02'))  # import tax rate (2%)
+FALLOS_PARA_AGOTAR = int(os.getenv('FALLOS_PARA_AGOTAR', '15'))  # consecutive eBay failures before marking sold-out
+HORA_SYNC_BAJO_PEDIDO_UTC = int(os.getenv('HORA_SYNC_BAJO_PEDIDO_UTC', '11'))  # 6:00 a.m. Colombia (UTC-5)
+
 # Deal Watcher
 TRM_CACHE_TTL_SECONDS = int(os.getenv('TRM_CACHE_TTL_SECONDS', '21600'))  # 6 h
 NOTIFICATION_COOLDOWN_HOURS = int(os.getenv('NOTIFICATION_COOLDOWN_HOURS', '6'))

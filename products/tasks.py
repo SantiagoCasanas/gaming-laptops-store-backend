@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 @shared_task(name='products.tasks.actualizar_precios_bajo_pedido', bind=True, max_retries=3)
 def actualizar_precios_bajo_pedido(self):
     """
+    DEPRECATED (Hito 4): superseded by products.services.bajo_pedido_sync_service.sync_bajo_pedido_precios_disponibilidad; no longer invoked by correr_tareas_programadas. Kept for rollback.
+
     Daily task: Fetch prices from eBay for all BajoPedido records with enlace_proveedor.
     Updates BajoPedido.precio and BajoPedido.estado based on availability.
 

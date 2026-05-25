@@ -3,7 +3,7 @@ from django.db import transaction
 from .models import (
     Brand, TipoProducto, CampoProducto, TipoProductoCampo, Proveedor,
     Producto, ProductoCampoValor, ImagenProducto,
-    BajoPedido, Descuento, UnidadProducto
+    BajoPedido, Descuento, UnidadProducto, SyncBajoPedidoLog
 )
 
 
@@ -765,6 +765,10 @@ class BajoPedidoSerializer(serializers.ModelSerializer):
     condicion_display = serializers.CharField(source='get_condicion_display', read_only=True)
     estado_display = serializers.CharField(source='get_estado_display', read_only=True)
     descuento = serializers.SerializerMethodField()
+    # --- Daily eBay sync state (read-only telemetry; never written here) ---
+    disponibilidad_ebay_display = serializers.CharField(
+        source='get_disponibilidad_ebay_display', read_only=True
+    )
 
     class Meta:
         model = BajoPedido
@@ -773,7 +777,14 @@ class BajoPedidoSerializer(serializers.ModelSerializer):
             'precio', 'condicion', 'condicion_display',
             'estado', 'estado_display',
             'proveedor', 'proveedor_nombre', 'enlace_proveedor',
-            'fecha_creacion', 'active', 'descuento',
+            'created_at', 'active', 'descuento',
+            # eBay sync state
+            'ebay_legacy_id', 'disponibilidad_ebay', 'disponibilidad_ebay_display',
+            'fallos_consecutivos', 'ultimo_sync_at', 'ultimo_vendedor',
+        ]
+        read_only_fields = [
+            'ebay_legacy_id', 'disponibilidad_ebay', 'disponibilidad_ebay_display',
+            'fallos_consecutivos', 'ultimo_sync_at', 'ultimo_vendedor',
         ]
 
     def get_proveedor_nombre(self, obj):
@@ -800,6 +811,10 @@ class BajoPedidoDetailSerializer(serializers.ModelSerializer):
     condicion_display = serializers.CharField(source='get_condicion_display', read_only=True)
     estado_display = serializers.CharField(source='get_estado_display', read_only=True)
     descuento = serializers.SerializerMethodField()
+    # --- Daily eBay sync state (read-only telemetry; never written here) ---
+    disponibilidad_ebay_display = serializers.CharField(
+        source='get_disponibilidad_ebay_display', read_only=True
+    )
 
     class Meta:
         model = BajoPedido
@@ -808,7 +823,14 @@ class BajoPedidoDetailSerializer(serializers.ModelSerializer):
             'precio', 'condicion', 'condicion_display',
             'estado', 'estado_display',
             'proveedor', 'proveedor_nombre', 'enlace_proveedor',
-            'fecha_creacion', 'active', 'descuento',
+            'created_at', 'active', 'descuento',
+            # eBay sync state
+            'ebay_legacy_id', 'disponibilidad_ebay', 'disponibilidad_ebay_display',
+            'fallos_consecutivos', 'ultimo_sync_at', 'ultimo_vendedor',
+        ]
+        read_only_fields = [
+            'ebay_legacy_id', 'disponibilidad_ebay', 'disponibilidad_ebay_display',
+            'fallos_consecutivos', 'ultimo_sync_at', 'ultimo_vendedor',
         ]
 
     def get_proveedor_nombre(self, obj):
@@ -1183,3 +1205,152 @@ class UnidadReparacionSerializer(serializers.ModelSerializer):
         if obj.cliente_metodo_aliado_id and not obj.fecha_entrega_metodo_aliado:
             return obj.cliente_metodo_aliado.nombre_completo
         return None
+
+
+# ---------------------------------------------------------------------------
+# Public catalog (Hito 6)
+# ---------------------------------------------------------------------------
+#
+# Read-only, public-safe serializer that resolves availability ("frontera")
+# and price on the SERVER, so the frontend never decides. It exposes ONLY an
+# explicit allowlist of fields — never units, serials, costs, supplier links,
+# eBay ids, sync counters or users.
+
+# Physical/logistic UnidadProducto states that count as a real, sellable unit.
+# Mirrors `_ESTADO_PRODUCTO_CON_UNIDADES` in
+# products/services/bajo_pedido_sync_service.py — kept as a local documented
+# constant here to avoid importing a private symbol across services.
+ESTADOS_PRODUCTO_DISPONIBLES = (
+    UnidadProducto.EstadoProductoChoices.EN_STOCK,
+    UnidadProducto.EstadoProductoChoices.VIAJANDO,
+    UnidadProducto.EstadoProductoChoices.EN_OFICINA_IMPORTADORA,
+    UnidadProducto.EstadoProductoChoices.POR_COMPRAR,
+)
+
+
+class CatalogProductoSerializer(serializers.ModelSerializer):
+    """
+    Public, read-only serializer for the storefront catalog.
+
+    Resolves the availability frontier and the displayed price on the server.
+    Only the fields below are ever exposed — nothing sensitive leaks out.
+
+    `disponibilidad_catalogo` ∈ {"en_stock", "bajo_pedido", "sin_existencias"}.
+    `precio` is the resolved price for that availability tier (number) or null.
+
+    The view MUST prefetch `unidades` and `bajo_pedidos` (plus `imagenes` and
+    `campo_valores__campo_producto`) so resolution runs in Python over the
+    prefetched lists with no extra queries (no N+1).
+    """
+    marca_nombre = serializers.CharField(source='marca.name', read_only=True)
+    tipo_producto_nombre = serializers.CharField(
+        source='tipo_producto.nombre', read_only=True
+    )
+    campo_valores = ProductoCampoValorSerializer(many=True, read_only=True)
+    imagenes = ImagenProductoSerializer(many=True, read_only=True)
+    disponibilidad_catalogo = serializers.SerializerMethodField()
+    precio = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Producto
+        fields = [
+            'id', 'nombre', 'nombre_base', 'descripcion',
+            'marca', 'marca_nombre',
+            'tipo_producto', 'tipo_producto_nombre',
+            'campo_valores', 'imagenes',
+            'disponibilidad_catalogo', 'precio',
+        ]
+
+    def _resolve(self, obj):
+        """
+        Compute (disponibilidad, precio) once per object and memoize on the
+        instance. Filters happen in Python over prefetched relations so a
+        properly-prefetched queryset incurs no extra queries.
+
+        Frontier:
+          1. Units active + sin_vender + estado_producto in the available set
+             → 'en_stock', precio = min(unit prices).
+          2. Else, active BajoPedido listings of the product:
+             - any with disponibilidad_ebay == 'disponible'
+               → 'bajo_pedido', precio = min(price of those).
+             - else any listing (agotado/desconocido)
+               → 'sin_existencias', precio = min(price of all listings)
+                 (last known price).
+             - else (no units, no listings) → 'sin_existencias', precio = None.
+        """
+        cached = getattr(obj, '_catalog_resolved', None)
+        if cached is not None:
+            return cached
+
+        unidades_disp = [
+            u for u in obj.unidades.all()
+            if u.active
+            and u.estado_venta == UnidadProducto.EstadoVentaChoices.SIN_VENDER
+            and u.estado_producto in ESTADOS_PRODUCTO_DISPONIBLES
+        ]
+        if unidades_disp:
+            resolved = (
+                'en_stock',
+                min(u.precio for u in unidades_disp),
+            )
+            obj._catalog_resolved = resolved
+            return resolved
+
+        listings = [bp for bp in obj.bajo_pedidos.all() if bp.active]
+        disponibles = [
+            bp for bp in listings
+            if bp.disponibilidad_ebay
+            == BajoPedido.DisponibilidadEbayChoices.DISPONIBLE
+        ]
+        if disponibles:
+            resolved = (
+                'bajo_pedido',
+                min(bp.precio for bp in disponibles),
+            )
+        elif listings:
+            resolved = (
+                'sin_existencias',
+                min(bp.precio for bp in listings),
+            )
+        else:
+            resolved = ('sin_existencias', None)
+
+        obj._catalog_resolved = resolved
+        return resolved
+
+    def get_disponibilidad_catalogo(self, obj):
+        return self._resolve(obj)[0]
+
+    def get_precio(self, obj):
+        return self._resolve(obj)[1]
+
+
+# ---------------------------------------------------------------------------
+# SyncBajoPedidoLog serializer (Hito 7 — read-only sync telemetry)
+# ---------------------------------------------------------------------------
+
+class SyncBajoPedidoLogSerializer(serializers.ModelSerializer):
+    """
+    Read-only serializer for the daily Bajo Pedido eBay sync audit log.
+
+    Surfaces one row per sync attempt per listing for admin/monitoring views.
+    The view is expected to `select_related('bajo_pedido__producto')` to avoid
+    N+1 on `producto_nombre` / `condicion*`. This serializer never writes.
+    """
+    producto_nombre = serializers.CharField(source='bajo_pedido.producto.nombre', read_only=True)
+    condicion = serializers.CharField(source='bajo_pedido.condicion', read_only=True)
+    condicion_display = serializers.CharField(source='bajo_pedido.get_condicion_display', read_only=True)
+    resultado_display = serializers.CharField(source='get_resultado_display', read_only=True)
+
+    class Meta:
+        model = SyncBajoPedidoLog
+        fields = [
+            'id', 'bajo_pedido', 'producto_nombre',
+            'condicion', 'condicion_display',
+            'resultado', 'resultado_display',
+            'was_available', 'price_usd', 'trm_used',
+            'precio_anterior', 'precio_nuevo',
+            'seller_username', 'seller_is_trusted',
+            'error_message', 'checked_at',
+        ]
+        read_only_fields = fields

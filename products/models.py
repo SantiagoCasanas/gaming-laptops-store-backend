@@ -290,6 +290,11 @@ class BajoPedido(BaseModel):
         SIN_EXISTENCIAS = 'sin_existencias', 'Out of Stock'
         INACTIVO = 'inactivo', 'Inactive'
 
+    class DisponibilidadEbayChoices(models.TextChoices):
+        DISPONIBLE = 'disponible', 'Available'
+        AGOTADO = 'agotado', 'Sold Out'
+        DESCONOCIDO = 'desconocido', 'Unknown'
+
     producto = models.ForeignKey(
         Producto,
         on_delete=models.PROTECT,
@@ -331,6 +336,35 @@ class BajoPedido(BaseModel):
         null=True,
         related_name='bajo_pedidos_modificados',
         help_text="Last user who modified this record"
+    )
+    # --- Daily eBay price & availability sync fields (written by the sync task) ---
+    ebay_legacy_id = models.CharField(
+        max_length=50,
+        db_index=True,
+        null=True,
+        blank=True,
+        help_text="eBay legacy item ID parsed from enlace_proveedor; used by the daily sync"
+    )
+    disponibilidad_ebay = models.CharField(
+        max_length=20,
+        choices=DisponibilidadEbayChoices.choices,
+        default=DisponibilidadEbayChoices.DESCONOCIDO,
+        help_text="Last known eBay availability. Written ONLY by the sync task"
+    )
+    fallos_consecutivos = models.IntegerField(
+        default=0,
+        help_text="Consecutive failed eBay lookups; reset to 0 on a successful sync"
+    )
+    ultimo_sync_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp of the last sync attempt against eBay"
+    )
+    ultimo_vendedor = models.CharField(
+        max_length=100,
+        null=True,
+        blank=True,
+        help_text="Seller username seen on the last successful eBay sync"
     )
 
     class Meta:
@@ -489,6 +523,89 @@ class UnidadProducto(BaseModel):
 
     def __str__(self):
         return f"Unit {self.serial} - {self.producto.nombre} ({self.condicion})"
+
+
+class SyncBajoPedidoLog(BaseModel):
+    """
+    Audit log for the daily eBay price & availability sync.
+    One row per sync attempt per listing (BajoPedido). Read-only telemetry.
+    """
+    class ResultadoChoices(models.TextChoices):
+        PRECIO_SUBIDO = 'precio_subido', 'Price Raised'
+        SIN_CAMBIO = 'sin_cambio', 'No Change'
+        MARGEN_PARA_BAJAR = 'margen_para_bajar', 'Margin To Lower'
+        AGOTADO_SELLER = 'agotado_seller', 'Sold Out (Seller)'
+        AGOTADO_FALLOS = 'agotado_fallos', 'Sold Out (Consecutive Failures)'
+        FALLO_EBAY = 'fallo_ebay', 'eBay Lookup Failed'
+        SIN_UNIDADES_SKIP = 'sin_unidades_skip', 'Skipped (No Units)'
+        CON_UNIDADES_SKIP = 'con_unidades_skip', 'Skipped (Has Units)'
+
+    bajo_pedido = models.ForeignKey(
+        'BajoPedido',
+        on_delete=models.CASCADE,
+        related_name='sync_logs',
+        help_text="Listing this sync attempt refers to"
+    )
+    checked_at = models.DateTimeField(
+        auto_now_add=True,
+        db_index=True,
+        help_text="When this sync attempt was recorded"
+    )
+    was_available = models.BooleanField(
+        default=False,
+        help_text="Whether the eBay item was available at check time"
+    )
+    price_usd = models.DecimalField(
+        max_digits=10, decimal_places=2,
+        null=True, blank=True,
+        help_text="eBay price in USD at check time"
+    )
+    trm_used = models.DecimalField(
+        max_digits=10, decimal_places=2,
+        null=True, blank=True,
+        help_text="COP/USD exchange rate applied"
+    )
+    precio_anterior = models.DecimalField(
+        max_digits=14, decimal_places=2,
+        null=True, blank=True,
+        help_text="BajoPedido price before this sync (COP)"
+    )
+    precio_nuevo = models.DecimalField(
+        max_digits=14, decimal_places=2,
+        null=True, blank=True,
+        help_text="BajoPedido price after this sync (COP)"
+    )
+    seller_username = models.CharField(
+        max_length=100,
+        blank=True,
+        default='',
+        help_text="eBay seller username seen at check time"
+    )
+    seller_is_trusted = models.BooleanField(
+        default=False,
+        help_text="Whether the seller was a trusted seller at check time"
+    )
+    resultado = models.CharField(
+        max_length=30,
+        choices=ResultadoChoices.choices,
+        help_text="Outcome of this sync attempt"
+    )
+    error_message = models.TextField(
+        blank=True,
+        default='',
+        help_text="Error detail when the sync attempt failed"
+    )
+
+    class Meta:
+        verbose_name = "Bajo Pedido Sync Log"
+        verbose_name_plural = "Bajo Pedido Sync Logs"
+        ordering = ['-checked_at']
+        indexes = [
+            models.Index(fields=['bajo_pedido', '-checked_at']),
+        ]
+
+    def __str__(self):
+        return f"SyncLog #{self.pk} {self.bajo_pedido_id} -> {self.resultado} @ {self.checked_at}"
 
 
 class Descuento(BaseModel):

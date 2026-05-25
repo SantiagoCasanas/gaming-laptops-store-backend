@@ -184,6 +184,36 @@ def record_usage(period: date, api_calls: int, now: Optional[datetime] = None) -
         )
 
 
+def record_reserve_usage(
+    api_calls: int,
+    cfg: Optional[ConfiguracionNotificador] = None,
+    now: Optional[datetime] = None,
+) -> None:
+    """Telemetría: registra llamadas a eBay consumidas por tareas que NO son el
+    notificador (p. ej. el sync diario de bajo-pedido), imputándolas a la
+    `reserva_otros_llamados` del período actual.
+
+    Incrementa atómicamente `UsoDiarioNotificador.llamados_reserva_usados` del
+    período vigente (mismo cálculo de período que `record_usage`, vía
+    `period_key(cfg, localtime)`), creando la fila si hace falta.
+
+    NO toca `llamados_usados` ni `ciclos_ejecutados`, y NO interviene en
+    `should_run_now`: es puramente informativo (cuánto se "comió" de la reserva).
+    Defensivo: si `api_calls <= 0` no hace nada.
+    """
+    if api_calls <= 0:
+        return
+    cfg = cfg or get_config()
+    now = now or timezone.now()
+    now_local = timezone.localtime(now)
+    period = period_key(cfg, now_local)
+    with transaction.atomic():
+        UsoDiarioNotificador.objects.get_or_create(dia=period)
+        UsoDiarioNotificador.objects.filter(dia=period).update(
+            llamados_reserva_usados=F('llamados_reserva_usados') + api_calls,
+        )
+
+
 # ---------------------------------------------------------------------------
 # Status snapshot (para la página admin)
 # ---------------------------------------------------------------------------

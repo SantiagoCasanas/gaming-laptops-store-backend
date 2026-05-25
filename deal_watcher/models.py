@@ -368,6 +368,14 @@ class UsoDiarioNotificador(models.Model):
         default=0,
         help_text="Veces que el notificador efectivamente corrió en el período.",
     )
+    llamados_reserva_usados = models.IntegerField(
+        default=0,
+        help_text=(
+            "eBay calls consumed from reserva_otros_llamados by non-notifier "
+            "tasks (e.g. bajo-pedido sync). Telemetry only; NOT used by "
+            "should_run_now pacing."
+        ),
+    )
     ultima_ejecucion_at = models.DateTimeField(
         null=True,
         blank=True,

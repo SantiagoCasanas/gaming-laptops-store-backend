@@ -33,6 +33,7 @@ from .views import (
     BajoPedidoUpdateView,
     BajoPedidoActivateView,
     BajoPedidoDeactivateView,
+    SyncBajoPedidoLogListView,
     DescuentoActivateView,
     DescuentoDeactivateView,
     DescuentoDeleteView,
@@ -55,6 +56,8 @@ from .views import (
     ConfirmarCargueMasivoView,
     ProductoUploadImagenesView,
     PromoCardsDataView,
+    PublicCatalogListView,
+    PublicCatalogDetailView,
 )
 
 urlpatterns = [
@@ -87,6 +90,10 @@ urlpatterns = [
     path('suppliers/activate/<int:pk>/', ProveedorActivateView.as_view(), name='proveedor_activate'),
     path('suppliers/deactivate/<int:pk>/', ProveedorDeactivateView.as_view(), name='proveedor_deactivate'),
 
+    # Public catalog endpoints (Hito 6) — PUBLIC, AllowAny, no auth required
+    path('catalogo/', PublicCatalogListView.as_view(), name='catalogo_list'),
+    path('catalogo/<int:pk>/', PublicCatalogDetailView.as_view(), name='catalogo_detail'),
+
     # Producto endpoints
     path('productos/list/', ProductoListView.as_view(), name='producto_list'),
     path('productos/create/', ProductoCreateView.as_view(), name='producto_create'),
@@ -102,6 +109,9 @@ urlpatterns = [
     path('variantes/activate/<int:pk>/', BajoPedidoActivateView.as_view(), name='variante_activate'),
     path('variantes/deactivate/<int:pk>/', BajoPedidoDeactivateView.as_view(), name='variante_deactivate'),
     path('variantes/<int:pk>/detail/', BajoPedidoDetailView.as_view(), name='variante_detail'),
+
+    # Bajo Pedido daily sync log (read-only monitoring — Hito 7)
+    path('sync-bajo-pedido/logs/', SyncBajoPedidoLogListView.as_view(), name='sync_bajo_pedido_logs'),
 
     # Descuento endpoints
     path('descuentos/activate/<int:pk>/', DescuentoActivateView.as_view(), name='descuento_activate'),

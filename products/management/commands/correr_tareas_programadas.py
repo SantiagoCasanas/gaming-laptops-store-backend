@@ -10,13 +10,16 @@ este comando según `cronSchedule`, corre, y el servicio se apaga.
     python manage.py correr_tareas_programadas --solo-notificador
 
 Modos:
-- Sin flags (uso manual / compatibilidad): corre precios Bajo Pedido + Deal Watcher
-  (ambos incondicionales).
+- Sin flags (uso manual / compatibilidad): corre el sync Bajo Pedido (precios +
+  disponibilidad) + Deal Watcher (ambos incondicionales).
 - `--cron-frecuente` (lo usa el cron cada 5 min): el Deal Watcher se pacéa con
   `scheduler_service.should_run_now()` (presupuesto diario repartido de forma
-  pareja dentro de la franja activa, hora Colombia); la reconciliación de precios
-  solo en el primer tick de las horas UTC 0/12/18 (3x/día) para no agotar la cuota.
+  pareja dentro de la franja activa, hora Colombia); el sync Bajo Pedido corre
+  una vez al día, en el primer tick de la hora UTC `HORA_SYNC_BAJO_PEDIDO_UTC`.
 - `--solo-notificador`: corre únicamente el Deal Watcher (incondicional).
+
+El sync Bajo Pedido es independiente de `ConfiguracionNotificador.active`: ese
+flag solo gobierna al Deal Watcher.
 
 Cada tarea está envuelta en su propio try/except para que el fallo de una
 no impida la otra. Se schedulea desde `railway.cron.toml`.
@@ -26,21 +29,17 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone as dt_timezone
 
+from django.conf import settings
 from django.core.management.base import BaseCommand
 
 logger = logging.getLogger(__name__)
 
-# Horas UTC en las que corre la reconciliación de precios cuando el cron es
-# frecuente. 00/12/18 UTC = 7pm/7am/1pm hora Colombia: la misma cadencia 3x/día
-# que tenía el cron original (`0 0,12,18 * * *`).
-HORAS_PRECIOS_UTC = (0, 12, 18)
-
 
 class Command(BaseCommand):
     help = (
-        "Corre las tareas programadas de eBay (precios Bajo Pedido + Deal Watcher). "
-        "Con --cron-frecuente el notificador se pacéa por presupuesto/franja y los "
-        "precios corren 3x/día."
+        "Corre las tareas programadas de eBay (sync Bajo Pedido precios+disponibilidad "
+        "+ Deal Watcher). Con --cron-frecuente el notificador se pacéa por "
+        "presupuesto/franja y el sync corre 1x/día."
     )
 
     def add_arguments(self, parser):
@@ -49,35 +48,36 @@ class Command(BaseCommand):
             action="store_true",
             help=(
                 "Modo cron cada 5 min: el Deal Watcher se pacéa con el presupuesto "
-                "diario dentro de la franja activa; la tarea de precios solo en las "
-                "horas UTC 0/12/18 (3x/día), para no agotar la cuota de eBay."
+                "diario dentro de la franja activa; el sync Bajo Pedido solo en el "
+                "primer tick de la hora UTC HORA_SYNC_BAJO_PEDIDO_UTC (1x/día), "
+                "para no agotar la cuota de eBay."
             ),
         )
         parser.add_argument(
             "--solo-notificador",
             action="store_true",
-            help="Corre únicamente el Deal Watcher; omite por completo la tarea de precios.",
+            help="Corre únicamente el Deal Watcher; omite por completo el sync Bajo Pedido.",
         )
 
     def handle(self, *args, **options):
         self.stdout.write("== Tareas programadas: inicio ==")
 
-        correr_precios = self._debe_correr_precios(options)
+        # 1. Sync Bajo Pedido (precios + disponibilidad, eBay) -------------
+        try:
+            if self._debe_correr_sync(options):
+                from products.services.bajo_pedido_sync_service import (
+                    sync_bajo_pedido_precios_disponibilidad,
+                )
 
-        # 1. Precios Bajo Pedido (eBay) ------------------------------------
-        if correr_precios:
-            try:
-                from products.tasks import actualizar_precios_bajo_pedido
-                # .apply() ejecuta el shared_task de forma síncrona, en este
-                # proceso, sin tocar el broker. .get() devuelve el dict de
-                # resultado y re-lanza cualquier excepción del task.
-                result = actualizar_precios_bajo_pedido.apply().get()
-                self.stdout.write(self.style.SUCCESS(f"Bajo Pedido: {result}"))
-            except Exception as exc:  # noqa: BLE001 - una tarea no debe tumbar la otra
-                logger.exception("Fallo en actualizar_precios_bajo_pedido")
-                self.stderr.write(self.style.ERROR(f"Bajo Pedido FALLO: {exc}"))
-        else:
-            self.stdout.write("Bajo Pedido: omitido (fuera de ventana de reconciliación)")
+                resumen = sync_bajo_pedido_precios_disponibilidad()
+                self.stdout.write(self.style.SUCCESS(f"Sync Bajo Pedido: {resumen}"))
+            else:
+                self.stdout.write(
+                    "Sync Bajo Pedido: omitido (fuera de ventana de reconciliación)"
+                )
+        except Exception as exc:  # noqa: BLE001 - una tarea no debe tumbar la otra
+            logger.exception("Fallo en sync_bajo_pedido_precios_disponibilidad")
+            self.stderr.write(self.style.ERROR(f"Sync Bajo Pedido FALLO: {exc}"))
 
         # 2. Deal Watcher --------------------------------------------------
         try:
@@ -118,14 +118,14 @@ class Command(BaseCommand):
 
         self.stdout.write("== Tareas programadas: fin ==")
 
-    def _debe_correr_precios(self, options) -> bool:
-        """Decide si esta invocación corre la reconciliación de precios."""
+    def _debe_correr_sync(self, options) -> bool:
+        """Decide si esta invocación corre el sync Bajo Pedido."""
         if options["solo_notificador"]:
             return False
         if not options["cron_frecuente"]:
             # Invocación normal/manual: corre ambas tareas como siempre.
             return True
-        # Cron cada 5 min: solo en el primer tick (minuto < 5) de las horas
-        # 0/12/18 UTC, para conservar la cadencia 3x/día y la cuota de eBay.
+        # Cron cada 5 min: solo en el primer tick (minuto < 5) de la hora UTC
+        # configurada, para correr el sync 1x/día y conservar la cuota de eBay.
         ahora = datetime.now(dt_timezone.utc)
-        return ahora.hour in HORAS_PRECIOS_UTC and ahora.minute < 5
+        return ahora.hour == settings.HORA_SYNC_BAJO_PEDIDO_UTC and ahora.minute < 5
