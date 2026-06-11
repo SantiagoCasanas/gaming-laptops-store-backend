@@ -30,6 +30,7 @@ urlpatterns = [
     path('purchases/', include('purchases.urls')),
     path('dashboard/', include('dashboard.urls')),
     path('deal-watcher/', include('deal_watcher.urls')),
+    path('api/prestamo/', include('prestamo.urls')),
 ]
 
 if settings.DEBUG:

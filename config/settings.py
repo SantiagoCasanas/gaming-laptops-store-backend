@@ -69,6 +69,7 @@ INSTALLED_APPS = [
     'purchases',
     'dashboard',
     'deal_watcher',
+    'prestamo',
 ]
 
 MIDDLEWARE = [
