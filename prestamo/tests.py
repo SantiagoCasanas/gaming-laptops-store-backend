@@ -11,7 +11,9 @@ from django.contrib.auth import get_user_model
 from rest_framework.test import APITestCase
 
 from prestamo.engine import tasa_mensual
-from prestamo.models import AuditLog, Configuracion, Movimiento, Tramo
+from prestamo.models import (
+    AuditLog, Configuracion, Movimiento, PeriodoCalculado, Tramo,
+)
 from prestamo import services
 
 User = get_user_model()
@@ -30,6 +32,13 @@ def _seed_config():
 
 class PrestamoAPITests(APITestCase):
     def setUp(self):
+        # Las migraciones de datos (0002/0003) siembran una base; la limpiamos
+        # para que cada test parta de cero y sea determinista.
+        Movimiento.objects.all().delete()
+        PeriodoCalculado.objects.all().delete()
+        Configuracion.objects.all().delete()
+        Tramo.objects.all().delete()
+
         self.user = User.objects.create_user(email="a@b.com", password="x")
         self.client.force_authenticate(self.user)
         self.config = _seed_config()

@@ -19,27 +19,28 @@ from prestamo.engine import tasa_mensual
 from prestamo.models import Configuracion, Movimiento, Tramo
 
 # Corte del mes 1. Elegido para que hoy (jun-2026) caiga en el período 5,
-# dejando "el mes 5 listo" para registrar los abonos del amigo.
-FECHA_PRIMER_CORTE = date(2026, 2, 11)
+# Corte del mes 1 = 11 de marzo 2026. Así hoy (junio) el mes 4 ya está pagado
+# y el próximo pendiente es el mes 5 (11 de julio).
+FECHA_PRIMER_CORTE = date(2026, 3, 11)
 
-# Movimientos bitácora de los meses 1-4 (ya ejecutados, SIN abonos).
+# Movimientos bitácora de los meses 1-4 (ya pagados, SIN abonos).
 # (mes, fecha_corte, [(tipo, tramo, monto), ...])
 MOVIMIENTOS_1_A_4 = [
-    (1, date(2026, 2, 11), [
+    (1, date(2026, 3, 11), [
         ("cuota_amigo", "amigo", "1329824.71"),
         ("comision_2pct", "amigo", "900000.00"),
     ]),
-    (2, date(2026, 3, 11), [
+    (2, date(2026, 4, 11), [
         ("cuota_amigo", "amigo", "1179927.31"),
         ("comision_2pct", "amigo", "787156.64"),
         ("cuota_dueno", "dueno", "149897.40"),
     ]),
-    (3, date(2026, 4, 11), [
+    (3, date(2026, 5, 11), [
         ("cuota_amigo", "amigo", "1179927.31"),
         ("comision_2pct", "amigo", "775586.84"),
         ("cuota_dueno", "dueno", "149897.40"),
     ]),
-    (4, date(2026, 5, 11), [
+    (4, date(2026, 6, 11), [
         ("cuota_amigo", "amigo", "1179927.31"),
         ("comision_2pct", "amigo", "763840.24"),
         ("cuota_dueno", "dueno", "149897.40"),
@@ -83,9 +84,9 @@ class Command(BaseCommand):
         for nombre in (Tramo.AMIGO, Tramo.DUENO):
             Tramo.objects.get_or_create(nombre=nombre)
 
-        # Movimientos meses 1-4. Borramos primero los previos de bitácora para
-        # mantener idempotencia limpia.
-        Movimiento.objects.filter(fecha__lte=date(2026, 5, 31)).delete()
+        # Reset limpio: borramos TODOS los movimientos previos antes de
+        # registrar los meses 1-4 correctos.
+        Movimiento.objects.all().delete()
         creados = 0
         for mes, fecha, items in MOVIMIENTOS_1_A_4:
             for tipo, tramo, monto in items:
