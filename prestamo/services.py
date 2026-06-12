@@ -113,22 +113,25 @@ def get_resumen():
     def r(x):
         return str(engine.redondear(x))
 
+    # "Saldo actual" = saldo ya con los abonos del período en curso
+    # descontados (saldo_post_abono). Si no hubo abono este período coincide
+    # con el saldo de apertura; si lo hubo, lo refleja de inmediato.
     return {
         "configurado": True,
         "mes_en_curso": m,
         "plazo": config.plazo,
         "fecha_corte": config.dia_corte,
         "amigo": {
-            "saldo_actual": r(actual["amigo"]["saldo_inicial"]),
+            "saldo_actual": r(actual["amigo"]["saldo_post_abono"]),
             "proxima_cuota": r(actual["amigo"]["cuota"]),
             "proximo_2pct": r(actual["amigo"]["comision"]),
         },
         "dueno": {
-            "saldo_actual": r(actual["dueno"]["saldo_inicial"]),
+            "saldo_actual": r(actual["dueno"]["saldo_post_abono"]),
             "proxima_cuota": r(actual["dueno"]["cuota"]),
         },
         "banco": {
-            "saldo_actual": r(actual["banco"]["saldo_inicial"]),
+            "saldo_actual": r(actual["banco"]["saldo_post_abono"]),
             "cuota_total": r(actual["banco"]["cuota"]),
         },
     }
